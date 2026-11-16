@@ -3,86 +3,69 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Lee el token de forma segura desde la nube
+# --- MINI SERVIDOR WEB PARA RENDER (Evita el error de puertos) ---
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "¡Bot activo y funcionando!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+# -----------------------------------------------------------------
+
+# Lee el token de forma segura desde las variables de entorno de Render
 TOKEN = os.getenv("TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mensaje de bienvenida y menú de inversión"""
     await update.message.reply_text(
-        "🚀 **Bienvenido a Invierte Bot**\n\n"
+        "**Bienvenido a Invierte Bot**\n\n"
         "Tu asistente personal para el seguimiento del mercado cripto.\n\n"
-        "📊 **Comandos disponibles:**\n"
-        "• `/precio [cripto]` - Consulta el precio actual en USD (ej. `/precio bitcoin`).\n"
-        "• `/calcular [cripto] [cantidad]` - Calcula el valor total de tus activos (ej. `/calcular solana 2.5`)."
+        "**Comandos disponibles:**\n"
+        "• `/precio [cripto]` - Consulta el precio actual en USD.\n"
+        "• `/calcular [cripto] [cantidad]` - Calcula el valor total de tus activos."
     )
 
 async def obtener_precio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Consulta el precio actual de una criptomoneda"""
     if not context.args:
         await update.message.reply_text("⚠️ Indica una criptomoneda. Ejemplo: `/precio bitcoin`")
         return
     
     crypto = context.args[0].lower()
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={crypto}&vs_currencies=usd,usd_24h_change"
-    
-    try:
-        response = requests.get(url)
-        data = response.json()
-        
-        if crypto in data:
-            precio = data[crypto]["usd"]
-            cambio_24h = data[crypto].get("usd_24h_change", 0)
-            icono = "📈" if cambio_24h >= 0 else "📉"
-            
-            await update.message.reply_text(
-                f"💵 **{crypto.capitalize()}**\n"
-                f"• Precio: **${precio:,.2f} USD**\n"
-                f"• Cambio 24h: {icono} {cambio_24h:.2f}%"
-            )
-        else:
-            await update.message.reply_text("❌ No encontré esa criptomoneda. Escribe su nombre en inglés (ej. bitcoin, ethereum, cardano).")
-    except Exception:
-        await update.message.reply_text("⚠️ Error al conectar con el servidor de precios.")
-
-async def calcular_inversion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Calcula el valor total de una cantidad de criptomonedas"""
-    if len(context.args) < 2:
-        await update.message.reply_text("⚠️ Uso correcto: `/calcular [cripto] [cantidad]`\nEjemplo: `/calcular ethereum 0.5`")
-        return
-    
-    crypto = context.args[0].lower()
-    try:
-        cantidad = float(context.args[1])
-    except ValueError:
-        await update.message.reply_text("❌ La cantidad debe ser un número válido.")
-        return
-
     url = f"https://api.coingecko.com/api/v3/simple/price?ids={crypto}&vs_currencies=usd"
     
     try:
         response = requests.get(url)
         data = response.json()
-        
         if crypto in data:
-            precio_unitario = data[crypto]["usd"]
-            total = precio_unitario * cantidad
-            await update.message.reply_text(
-                f"💼 **Cálculo de Inversión**\n"
-                f"• Activo: {crypto.capitalize()}\n"
-                f"• Cantidad: {cantidad}\n"
-                f"• Valor Total: **${total:,.2f} USD**"
-            )
+            precio = data[crypto]["usd"]
+            await update.message.reply_text(f"El precio actual de {crypto.capitalize()} es ${precio} USD.")
         else:
             await update.message.reply_text("❌ Criptomoneda no encontrada.")
     except Exception:
-        await update.message.reply_text("⚠️ Ocurrió un error al procesar el cálculo.")
+        await update.message.reply_text("❌ Error al consultar el precio.")
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(TOKEN).build()
+def main():
+    # Enciende el servidor web en segundo plano para abrir el puerto de Render
+    keep_alive()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("precio", obtener_precio))
-    app.add_handler(CommandHandler("calcular", calcular_inversion))
+    # Configuración del bot de Telegram
+    application = ApplicationBuilder().token(TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("precio", obtener_precio))
+    
+    # Arranca el bot
+    application.run_polling()
 
-    print("🤖 Bot de inversión configurado y en ejecución 24/7...")
-    app.run_polling()
+if __name__ == '__main__':
+    main()
