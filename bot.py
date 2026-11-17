@@ -855,4 +855,80 @@ def main():
     app_bot.run_polling()
 
 if __name__ == "__main__":
+    # --- FUNCIÓN PRINCIPAL DE INICIO ---
+def main():
+    # 1. Iniciar servidor Flask en un hilo secundario para mantener el puerto abierto en Render
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+    # 2. Asignar un bucle de eventos explícito al hilo principal para evitar el RuntimeError en Render
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 3. Construir la aplicación del bot vinculando la tarea en segundo plano (post_init)
+    app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    # --- REGISTRO DE COMANDOS Y HANDLERS ---
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
+    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
+    app_bot.add_handler(CommandHandler("aviso", aviso_mantenimiento))
+    
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    # 4. Arrancar el bot con el bucle gestionado correctamente
+    app_bot.run_polling()
+
+if __name__ == "__main__":
+# --- FUNCIÓN PRINCIPAL DE INICIO ---
+def main():
+    # 1. Iniciar servidor Flask en un hilo secundario para mantener el puerto abierto en Render
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+    # 2. Asignar un bucle de eventos explícito al hilo principal para evitar el RuntimeError en Render
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 3. Construir la aplicación del bot vinculando la tarea en segundo plano (post_init)
+    app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    # --- REGISTRO DE COMANDOS Y HANDLERS ---
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
+    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
+    app_bot.add_handler(CommandHandler("aviso", aviso_mantenimiento))
+    
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    # 4. Arrancar el bot con el bucle gestionado correctamente
+    app_bot.run_polling()
+
+if __name__ == "__main__":
     main()
