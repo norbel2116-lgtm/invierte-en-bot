@@ -153,23 +153,23 @@ async def obtener_ultima_transaccion_ton():
                         tx = data["result"][0]
                         tx_hash_data = tx.get("transaction_id", {})
                         hash_tx = tx_hash_data.get("hash", "")
-                        monto = round(random.uniform(5.0, 500.0), 2)
+                        monto = round(random.uniform(10.0, 450.0), 2)
                         
                         if hash_tx:
                             return {
                                 "hash": hash_tx,
                                 "monto": monto,
-                                "moneda": "GRAM",
-                                "red": "TON",
+                                "moneda": random.choice(["GRAM", "USDT"]),
+                                "red": "TON (Jetton/TON)",
                                 "explorer": f"https://tonviewer.com/transaction/{hash_tx}"
                             }
     except Exception as e:
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO: FLUJO DEL CANAL (BLINDADO Y CORREGIDO) ---
+# --- TAREA EN SEGUNDO PLANO: FLUJO EQUILIBRADO 50/50 (TRON Y TON) ---
 async def bucle_comprobaciones(application):
-    await asyncio.sleep(20)
+    await asyncio.sleep(10)
     while True:
         try:
             ahora = datetime.now()
@@ -195,11 +195,16 @@ async def bucle_comprobaciones(application):
 
             datos_tx = None
             try:
-                if random.choice([True, False]):
+                # 50% de probabilidad real para elegir entre TRON y TON por igual
+                usar_tron = random.choice([True, False])
+                if usar_tron:
                     datos_tx = await obtener_ultima_transaccion_tron()
-                
-                if not datos_tx:
+                    if not datos_tx:  # Si Tron falla, intenta con Ton de respaldo
+                        datos_tx = await obtener_ultima_transaccion_ton()
+                else:
                     datos_tx = await obtener_ultima_transaccion_ton()
+                    if not datos_tx:  # Si Ton falla, intenta con Tron de respaldo
+                        datos_tx = await obtener_ultima_transaccion_tron()
             except Exception as blockchain_err:
                 print(f"Aviso en consulta blockchain: {blockchain_err}")
 
@@ -210,11 +215,20 @@ async def bucle_comprobaciones(application):
                 red_oficial = datos_tx["red"]
                 explorer_url = datos_tx["explorer"]
             else:
-                tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
-                monto = round(random.uniform(3.0, 1500.0), 2)
-                moneda_nombre = "USDT"
-                red_oficial = "TRON (TRC20)"
-                explorer_url = "https://tronscan.org/#/transaction/"
+                # Datos simulados con balanceo equitativo de red si la API pública demora
+                es_red_ton = random.choice([True, False])
+                if es_red_ton:
+                    tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
+                    monto = round(random.uniform(15.0, 800.0), 2)
+                    moneda_nombre = random.choice(["GRAM", "USDT"])
+                    red_oficial = "TON"
+                    explorer_url = "https://tonviewer.com/transaction/"
+                else:
+                    tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
+                    monto = round(random.uniform(20.0, 1200.0), 2)
+                    moneda_nombre = "USDT"
+                    red_oficial = "TRON (TRC20)"
+                    explorer_url = "https://tronscan.org/#/transaction/"
 
             usuario = generar_usuario_ficticio()
 
@@ -250,12 +264,11 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
-        # Intervalos variados en segundos
-        intervalos_posibles = [60, 180, 300, 600, 1200, 2100, 2700, 3600]
+        # Intervalos optimizados y más dinámicos (de 30 segundos a 3 minutos para que el canal tenga buen movimiento)
+        intervalos_posibles = [30, 60, 90, 120, 180]
         await asyncio.sleep(random.choice(intervalos_posibles))
 
 async def post_init(application):
-    # Corrección clave para que el bot inicie la tarea de fondo de forma segura en PTB v20+
     application.create_task(bucle_comprobaciones(application))
 
 # --- TECLADOS INLINE ---
