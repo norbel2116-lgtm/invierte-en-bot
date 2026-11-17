@@ -126,12 +126,10 @@ async def bucle_comprobaciones(application):
 
             # 1. ACTUALIZACIÓN AUTOMÁTICA DEL FONDO DE LIQUIDEZ
             if ahora.weekday() == 0 and random.choice([True, False]):
-                # Lunes: Disminuye de 15% a 35% por retiros
                 porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
                 monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
                 fondo_actual = max(100000.0, fondo_actual - monto_restar)
             else:
-                # Resto de ciclos (cada 12h): Aumenta de 0.5% a 4.6%
                 porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
                 monto_sumar = fondo_actual * (porcentaje_subida / 100.0)
                 fondo_actual += monto_sumar
@@ -176,7 +174,6 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
-            # Espera exacta de 12 horas (43200 segundos) para la siguiente actualización del fondo
             await asyncio.sleep(43200)
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
@@ -242,7 +239,7 @@ def obtener_menu_principal(idioma="es"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- COMANDO /START ---
+# --- COMANDO /START CORREGIDO ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -273,10 +270,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     texto = "🌐 **Welcome / Bienvenido**\n\nPor favor, selecciona tu idioma / Please select your language:"
     
-    if update.message:
-        await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
+    try:
+        if update.message:
+            await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
+        elif update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error en start: {e}")
 
 # --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
@@ -321,6 +322,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = query.from_user
 
+    if data == "btn_cambiar_idioma":
+        await start(update, context)
+        return
+
     if data.startswith("lang_"):
         nuevo_idioma = data.split("_")[1]
         conn = sqlite3.connect("usuarios.db")
@@ -352,7 +357,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👇 **Selecciona una opción del menú interactivo:**"
             )
         
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error al editar texto de idioma: {e}")
         return
 
     conn = sqlite3.connect("usuarios.db")
@@ -361,10 +369,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = cursor.fetchone()
     conn.close()
     idioma = row[0] if row else 'es'
-
-    if data == "btn_cambiar_idioma":
-        await start(update, context)
-        return
 
     if data == "btn_saldo":
         conn = sqlite3.connect("usuarios.db")
@@ -386,7 +390,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             texto = f"💰 **Live Balance:**\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 **Tu Balance y Rendimiento en Vivo:**\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
         
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_liquidez":
         conn = sqlite3.connect("usuarios.db")
@@ -410,7 +417,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• **Estado:** Activo y Respaldado en Redes Multired (TRON & TON)\n\n"
                 f"💡 *Respaldo operativo garantizado que asegura la estabilidad y procesamiento automatizado para todos los miembros.*"
             )
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_planes":
         if idioma == "en":
@@ -430,7 +440,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for key, plan in PLANES_INVERSION.items():
                 texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
         
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_depositar":
         if idioma == "en":
@@ -447,15 +460,24 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🔹 **Red TON (GRAM y USDT TON):**\n`UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v`\n\n"
                 "⚠️ Tras transferir, reporta con: `/notificar [Tu_Hash]`"
             )
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_referidos":
         texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_retirar":
         texto = "🏦 **Withdrawals**: Processed **every Monday** automatically to your verified wallet." if idioma == "en" else "🏦 **Sistema de Retiros**: Los pagos se procesan **todos los lunes** de forma automatizada a tu billetera verificada."
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
     elif data == "btn_soporte":
         conn = sqlite3.connect("usuarios.db")
@@ -464,7 +486,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         texto = "🎧 **Support Center**. Type your message below:" if idioma == "en" else "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
-        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
 
 # --- COMANDOS TRADICIONALES DE TEXTO ---
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
