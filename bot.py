@@ -660,4 +660,199 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             )
         except Exception as e:
-            print(f"No se pudo notificar al patrocinador {patrocinador_id} en el nivel {nivel}:
+            print(f"No se pudo notificar al patrocinador {patrocinador_id} en el nivel {nivel}: {e}")
+            
+        patrocinador_actual = patrocinador_id
+
+    conn.close()
+    
+    try:
+        await context.bot.send_message(
+            chat_id=id_usuario,
+            text="✅ **¡Depósito Acreditado con Éxito!**\nTu capital y tus ganancias diarias ya han comenzado a correr."
+        )
+        await update.message.reply_text(f"✔️ Depósito de `{monto} {moneda}` acreditado a `{id_usuario}` y comisiones distribuidas en los 4 niveles.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al notificar al usuario: {e}")
+
+async def referidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    idioma = row[0] if row else 'es'
+
+    texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏦 Los retiros se procesan **todos los lunes** de forma automatizada.", reply_markup=obtener_menu_principal('es'))
+
+async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Uso: `/invertir [ID_Plan] [Cantidad]`\nEjemplo: `/invertir 2 15`")
+        return
+    
+    plan_id = context.args[0]
+    try:
+        cantidad = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ La cantidad debe ser numérica.")
+        return
+    
+    if plan_id not in PLANES_INVERSION or not (3 <= cantidad <= 1000):
+        await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (3 - 1000 USD).")
+        return
+
+    plan = PLANES_INVERSION[plan_id]
+    wallet = WALLET_TRON if "Tron" in plan["red"] else WALLET_TON
+    
+    await update.message.reply_text(
+        f"✅ **Inversión Registrada**\n• Plan: {plan['nombre']}\n• Monto: {cantidad} {plan['moneda']}\n\n💳 Transfiere a:\n`{wallet}`\n\n📲 Reporta con: `/notificar [Tu_Hash]`",
+        parse_mode="Markdown"
+    )
+
+# --- COMANDO DE ADMINISTRADOR: AVISO GLOBAL (BROADCAST) ---
+async def aviso_mantenimiento(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    if user.id != ADMIN_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ Uso correcto: `/aviso [Tu mensaje de mantenimiento o comunicado]`", parse_mode="Markdown")
+        return
+
+    mensaje_aviso = " ".join(context.args)
+    
+    texto_final = (
+        f"🚨 **AVISO OFICIAL DE LA PLATAFORMA** 🚨\n\n"
+        f"{mensaje_aviso}"
+    )
+
+    if CHANNEL_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=texto_final,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"Error enviando aviso al canal: {e}")
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM usuarios")
+    usuarios = cursor.fetchall()
+    conn.close()
+
+    enviados = 0
+    fallidos = 0
+
+    for (user_id,) in usuarios:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=texto_final,
+                parse_mode="Markdown"
+            )
+            enviados += 1
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            fallidos += 1
+            print(f"No se pudo enviar al usuario {user_id}: {e}")
+
+    await update.message.reply_text(
+        f"✅ **Difusión completada:**\n"
+        f"• Canal notificado: Sí\n"
+        f"• Usuarios alcanzados: `{enviados}`\n"
+        f"• No entregados (bloquearon el bot): `{fallidos}`",
+        parse_mode="Markdown"
+    )
+
+# --- SISTEMA DE SOPORTE ---
+async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text("🎧 **Centro de Soporte Oficial**\n\nEscribe tu duda o problema a continuación y un operador te responderá.")
+
+async def responder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID or len(context.args) < 2:
+        return
+
+    id_destino = context.args[0]
+    mensaje_respuesta = " ".join(context.args[1:])
+
+    try:
+        await context.bot.send_message(chat_id=id_destino, text=f"💬 **Mensaje de Soporte:**\n\n{mensaje_respuesta}")
+        await update.message.reply_text(f"✅ Respuesta enviada al usuario `{id_destino}`.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    texto = update.message.text
+    if user.id == ADMIN_ID:
+        return
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT en_soporte FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row and row[0] == 1:
+        await update.message.reply_text("📩 **Mensaje recibido.** En breve será atendido por un asesor.")
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 **Nuevo Ticket de Soporte**\n\n👤 Usuario: {user.first_name} (`{user.id}`)\n💬 Mensaje: {texto}\n\n👉 Responder:\n`/responder {user.id} [Mensaje]`"
+            )
+        except Exception as e:
+            print(f"Error reenviando a admin: {e}")
+
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+
+# --- FUNCIÓN PRINCIPAL ---
+def main():
+    # Iniciar servidor Flask en hilo secundario para Render
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+    # Construcción limpia y directa del bot (compatible con python-telegram-bot v21+)
+    app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    # --- REGISTRO DE COMANDOS Y HANDLERS ---
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
+    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
+    app_bot.add_handler(CommandHandler("aviso", aviso_mantenimiento))
+    
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    # Iniciar bucle de polling
+    app_bot.run_polling()
+
+if __name__ == "__main__":
+    main()
