@@ -13,7 +13,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
 
 app = Flask('')
@@ -31,8 +31,8 @@ def keep_alive():
     t.start()
 
 TOKEN = os.getenv("TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  # ID o @ de tu canal de comprobantes
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))      # Tu ID numérico de Telegram para soporte
+CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  
+ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))      
 
 # --- BASE DE DATOS SQLITE ---
 def inicializar_db():
@@ -109,7 +109,7 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
                 
-                espera = random.randint(600, 3600)  # Intervalo de 10 min a 1 hora
+                espera = random.randint(600, 3600)  
                 await asyncio.sleep(espera)
             else:
                 await asyncio.sleep(1800)
@@ -533,8 +533,26 @@ def main():
 
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # Registro de Comandos
+    # Registro de Comandos y Handlers
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
     app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
     
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    # IMPORTANTE: Como estás en Render (Web Service gratuito), para evitar que falle por polling 
+    # puedes usar polling local si Render te lo permite temporalmente o configurar webhooks.
+    # Aquí dejamos el sistema listo para arrancar:
+    app_bot.run_polling()
+
+if __name__ == "__main__":
+    main()
