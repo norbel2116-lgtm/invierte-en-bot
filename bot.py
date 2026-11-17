@@ -16,12 +16,16 @@ from telegram.ext import (
 from flask import Flask
 from threading import Thread
 
-# --- SERVIDOR WEB FLASK (HILO PRINCIPAL PARA RENDER Y UPTIMEROBOT) ---
+# --- SERVIDOR WEB FLASK (HILO SECUNDARIO PARA RENDER Y UPTIMEROBOT) ---
 app = Flask('')
 
 @app.route('/')
 def home():
     return "OK", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  
@@ -160,7 +164,7 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO: FLUJO DEL CANAL (20 MIN A 1 HORA) ---
+# --- TAREA EN SEGUNDO PLANO: FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
@@ -233,7 +237,6 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
-            # Intervalo dinámico de 20 min (1200s) a 1 hora (3600s)
             await asyncio.sleep(random.randint(1200, 3600))
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
