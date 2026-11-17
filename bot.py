@@ -16,7 +16,7 @@ from telegram.ext import (
 from flask import Flask
 from threading import Thread
 
-# --- SERVIDOR WEB FLASK (HILO SECUNDARIO PARA RENDER Y UPTIMEROBOT) ---
+# --- SERVIDOR WEB FLASK (HILO SECUNDARIO) ---
 app = Flask('')
 
 @app.route('/')
@@ -741,11 +741,14 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
-# --- FUNCIÓN PARA ARRANCAR EL BOT DE TELEGRAM EN HILO SECUNDARIO ---
-def run_telegram():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+# --- ARRANQUE DUAL ESTABLE (EXIGIDO POR RENDER WEB SERVICE) ---
+if __name__ == "__main__":
+    # 1. Lanzamos Flask en un hilo secundario independiente para atender a Render y UptimeRobot al instante
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+    # 2. Construimos la aplicación del bot de Telegram
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app_bot.add_handler(CommandHandler("start", start))
@@ -763,15 +766,5 @@ def run_telegram():
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
+    # 3. Telegram corre en el hilo principal con su bucle síncrono limpio para que responda de inmediato
     app_bot.run_polling()
-
-# --- ARRANQUE PRINCIPAL (EXIGIDO POR RENDER WEB SERVICE) ---
-if __name__ == "__main__":
-    # 1. Lanzamos Telegram en segundo plano con su propio bucle de eventos limpio
-    t = Thread(target=run_telegram)
-    t.daemon = True
-    t.start()
-
-    # 2. Flask corre en el hilo principal abriendo el puerto web inmediatamente para Render
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
