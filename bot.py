@@ -765,14 +765,17 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
-# --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
-if __name__ == "__main__":
+# --- ARRANQUE DUAL ESTABLE (RENDER + TELEGRAM BOT v20+) ---
+def main():
+    # 1. Lanzar Flask en hilo secundario para mantener vivo el puerto web de Render
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
+    # 2. Construir la app del bot de Telegram limpiamente
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
+    # 3. Registrar todos los manejadores (handlers)
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
     app_bot.add_handler(CommandHandler("planes", mostrar_planes))
@@ -788,4 +791,8 @@ if __name__ == "__main__":
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    app_bot.run_polling()
+    # 4. Arrancar el bot de forma nativa permitiendo que la librería gestione su loop interno
+    app_bot.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
