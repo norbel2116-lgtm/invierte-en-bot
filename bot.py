@@ -167,9 +167,9 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO OPTIMIZADA ---
+# --- TAREA EN SEGUNDO PLANO: FLUJO EQUILIBRADO CON RANGOS EXACTOS ---
 async def bucle_comprobaciones(application):
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
     while True:
         try:
             ahora = datetime.now()
@@ -215,15 +215,20 @@ async def bucle_comprobaciones(application):
                 explorer_url = datos_tx["explorer"]
             else:
                 es_red_ton = random.choice([True, False])
+                
+                # Rangos exactos solicitados
+                if ahora.weekday() == 0 and random.choice([True, False]):
+                    monto = round(random.uniform(3.50, 1600.0), 2)  # Lunes: 3.50 a 1600 USD
+                else:
+                    monto = round(random.uniform(3.00, 1000.0), 2)  # Resto: 3 a 1000 USD
+
                 if es_red_ton:
                     tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
-                    monto = round(random.uniform(15.0, 800.0), 2)
                     moneda_nombre = random.choice(["GRAM", "USDT"])
                     red_oficial = "TON"
                     explorer_url = "https://tonviewer.com/transaction/"
                 else:
                     tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
-                    monto = round(random.uniform(20.0, 1200.0), 2)
                     moneda_nombre = "USDT"
                     red_oficial = "TRON (TRC20)"
                     explorer_url = "https://tronscan.org/#/transaction/"
@@ -262,7 +267,8 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
-        await asyncio.sleep(random.randint(45, 90))
+        intervalos_posibles = [30, 60, 90, 120, 180]
+        await asyncio.sleep(random.choice(intervalos_posibles))
 
 async def post_init(application):
     application.create_task(bucle_comprobaciones(application))
@@ -324,7 +330,6 @@ def obtener_menu_principal(idioma="es"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- COMANDO /START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -364,7 +369,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -401,7 +405,6 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
             f"✔ Transparencia total, sin letras pequeñas."
         )
 
-# --- MANEJADOR DE CLICS (CALLBACKS) ---
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -578,7 +581,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# --- COMANDOS TRADICIONALES DE TEXTO ---
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
@@ -602,7 +604,6 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
     hash_tx = " ".join(context.args)
     await update.message.reply_text(f"⏳ Comprobante recibido (`{hash_tx}`). En proceso de verificación.")
 
-# --- APROBAR DEPÓSITO Y NOTIFICAR 4 NIVELES DE PATROCINADORES ---
 async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id != ADMIN_ID:
@@ -713,7 +714,6 @@ async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# --- SISTEMA DE SOPORTE ---
 async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     conn = sqlite3.connect("usuarios.db")
@@ -757,7 +757,7 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
                 text=f"🚨 **Nuevo Ticket de Soporte**\n\n👤 Usuario: {user.first_name} (`{user.id}`)\n💬 Mensaje: {texto}\n\n👉 Responder:\n`/responder {user.id} [Mensaje]`"
             )
         except Exception as e:
-            print(f"Error reenviando a admin: {e}")
+            print(f"Error reenviando al admin: {e}")
 
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
@@ -765,24 +765,12 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
-async def post_init(application):
-    application.create_task(bucle_comprobaciones(application))
-
-# --- ARRANQUE DUAL ESTABLE (RENDER + EVENT LOOP FIJO) ---
+# --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
 if __name__ == "__main__":
-    # 1. Lanzar Flask en hilo secundario para Render / UptimeRobot
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    # 2. Configurar explícitamente el bucle de eventos para el hilo principal de Render
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    # 3. Construir la app del bot de Telegram
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app_bot.add_handler(CommandHandler("start", start))
@@ -800,5 +788,4 @@ if __name__ == "__main__":
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    # 4. Arrancar polling asegurando que el loop maneje la ejecución correctamente
     app_bot.run_polling()
