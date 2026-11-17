@@ -58,10 +58,30 @@ def inicializar_db():
 inicializar_db()
 
 PLANES_INVERSION = {
-    "1": {"nombre": "Plan TRX (Red Tron)", "moneda": "TRX", "red": "TRC20 (Tron)"},
-    "2": {"nombre": "Plan USDT (Red Tron)", "moneda": "USDT", "red": "TRC20 (Tron)"},
-    "3": {"nombre": "Plan GRAM (Red TON)", "moneda": "GRAM", "red": "TON"},
-    "4": {"nombre": "Plan USDT (Red TON)", "moneda": "USDT", "red": "TON"}
+    "1": {
+        "nombre": "Plan TRX & Cripto Base", 
+        "moneda": "TRX / USDT", 
+        "red": "TRC20 (Tron) & TON", 
+        "detalle": "Puedes depositar en USDT (Red Tron o TON), TRX o GRAM. Rendimiento optimizado."
+    },
+    "2": {
+        "nombre": "Plan USDT Estándar", 
+        "moneda": "USDT / TRX", 
+        "red": "TRC20 (Tron) & TON", 
+        "detalle": "Acepta USDT por Tron/TON, además de TRX y GRAM con acreditación automatizada."
+    },
+    "3": {
+        "nombre": "Plan GRAM & TON Pro", 
+        "moneda": "GRAM / USDT", 
+        "red": "TON & TRC20 (Tron)", 
+        "detalle": "Diseñado para operar fuertemente en red TON (GRAM, USDT) y red Tron (TRX, USDT)."
+    },
+    "4": {
+        "nombre": "Plan Élite Multired", 
+        "moneda": "Multidivisa", 
+        "red": "TRC20 & TON", 
+        "detalle": "Máxima flexibilidad: acepta USDT, TRX y GRAM en cualquiera de las dos redes oficiales."
+    }
 }
 
 MONEDAS_COMPROBACION = [
@@ -205,7 +225,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS / PLANES DE INSERCIÓN ---
+# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -312,9 +332,23 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
     elif data == "btn_planes":
-        texto = "📋 **Investment Plans**:\n• Min: 2 USD | Max: 1000 USD\n" if idioma == "en" else "📋 **Planes de Inversión y Rendimientos**:\n• Mínimo: 2 USD | Máximo: 1000 USD\n"
-        for key, plan in PLANES_INVERSION.items():
-            texto += f"• **ID {key}:** {plan['nombre']} (Network: {plan['red']})\n" if idioma == "en" else f"• **ID {key}:** {plan['nombre']} (Red: {plan['red']})\n"
+        if idioma == "en":
+            texto = (
+                "📋 **Investment Plans & Yields:**\n"
+                "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n"
+                "💡 *Note: In all plans you can deposit using USDT (Tron TRC20 or TON), TRX, or GRAM.*\n\n"
+            )
+            for key, plan in PLANES_INVERSION.items():
+                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Accepted: {plan['moneda']}\n   • Networks: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+        else:
+            texto = (
+                "📋 **Planes de Inversión y Rendimientos:**\n"
+                "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n"
+                "💡 *Nota: En todos los planes puedes depositar en USDT (Red Tron o TON), TRX y GRAM.*\n\n"
+            )
+            for key, plan in PLANES_INVERSION.items():
+                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+        
         await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
     elif data == "btn_depositar":
@@ -353,7 +387,14 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Usa el menú principal interactivo.", reply_markup=obtener_menu_principal('es'))
+    texto = (
+        "📋 **Planes de Inversión y Rendimientos:**\n"
+        "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n"
+        "💡 *Nota: En todos los planes puedes depositar en USDT (Red Tron o TON), TRX y GRAM.*\n\n"
+    )
+    for key, plan in PLANES_INVERSION.items():
+        texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+    await update.message.reply_text(texto, reply_markup=obtener_menu_principal('es'), parse_mode="Markdown")
 
 async def depositar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💳 **Wallets oficiales de depósito**", reply_markup=obtener_menu_principal('es'), parse_mode="Markdown")
@@ -549,9 +590,6 @@ def main():
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    # IMPORTANTE: Como estás en Render (Web Service gratuito), para evitar que falle por polling 
-    # puedes usar polling local si Render te lo permite temporalmente o configurar webhooks.
-    # Aquí dejamos el sistema listo para arrancar:
     app_bot.run_polling()
 
 if __name__ == "__main__":
