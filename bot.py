@@ -13,33 +13,26 @@ from telegram.ext import (
     filters, 
     ContextTypes
 )
-
 from flask import Flask
 from threading import Thread
 
+# --- CONFIGURACIÓN DE FLASK EN EL HILO PRINCIPAL PARA RENDER ---
 app = Flask('')
 
 @app.route('/')
 def home():
     return "OK", 200
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
-
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
 
+# Direcciones reales de tus billeteras para consultar la blockchain
 WALLET_TRON = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u"
 WALLET_TON = "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
 
+# --- BASE DE DATOS SQLITE ---
 def inicializar_db():
     conn = sqlite3.connect("usuarios.db")
     cursor = conn.cursor()
@@ -106,6 +99,7 @@ def generar_usuario_ficticio():
     nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
     return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
+# --- CONSULTAS REALES A LA BLOCKCHAIN (APIS PÚBLICAS) ---
 async def obtener_ultima_transaccion_tron():
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=1&address={WALLET_TRON}"
     try:
@@ -167,6 +161,7 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
+# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN Y FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
@@ -177,6 +172,7 @@ async def bucle_comprobaciones(application):
             cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
             fondo_actual = cursor.fetchone()[0]
 
+            # 1. Actualización automática del fondo de liquidez
             if ahora.weekday() == 0 and random.choice([True, False]):
                 porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
                 monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
@@ -191,6 +187,7 @@ async def bucle_comprobaciones(application):
             conn.commit()
             conn.close()
 
+            # 2. Obtener transacción real de la blockchain
             datos_tx = None
             if random.choice([True, False]):
                 datos_tx = await obtener_ultima_transaccion_tron()
@@ -247,6 +244,7 @@ async def bucle_comprobaciones(application):
 async def post_init(application):
     application.create_task(bucle_comprobaciones(application))
 
+# --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
         [
@@ -303,6 +301,7 @@ def obtener_menu_principal(idioma="es"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
+# --- COMANDO /START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -342,6 +341,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
+# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -376,6 +376,7 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
             f"• Transparencia total sin letras pequeñas."
         )
 
+# --- MANEJADOR DE CLICS (CALLBACKS) ---
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -552,6 +553,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+# --- COMANDOS TRADICIONALES DE TEXTO ---
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
@@ -575,6 +577,7 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
     hash_tx = " ".join(context.args)
     await update.message.reply_text(f"⏳ Comprobante recibido (`{hash_tx}`). En proceso de verificación.")
 
+# --- APROBAR DEPÓSITO Y NOTIFICAR 4 NIVELES DE PATROCINADORES ---
 async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id != ADMIN_ID:
@@ -633,4 +636,135 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"No se pudo notificar al patrocinador {patrocinador_id} en el nivel {nivel}: {e}")
             
-        patrocinador_actual = patrocinador_
+        patrocinador_actual = patrocinador_id
+
+    conn.close()
+    
+    try:
+        await context.bot.send_message(
+            chat_id=id_usuario,
+            text="✅ **¡Depósito Acreditado con Éxito!**\nTu capital y tus ganancias diarias ya han comenzado a correr."
+        )
+        await update.message.reply_text(f"✔️ Depósito de `{monto} {moneda}` acreditado a `{id_usuario}` y comisiones distribuidas en los 4 niveles.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al notificar al usuario: {e}")
+
+async def referidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    idioma = row[0] if row else 'es'
+
+    texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏦 Los retiros se procesan **todos los lunes** de forma automatizada.", reply_markup=obtener_menu_principal('es'))
+
+async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Uso: `/invertir [ID_Plan] [Cantidad]`\nEjemplo: `/invertir 2 15`")
+        return
+    
+    plan_id = context.args[0]
+    try:
+        cantidad = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ La cantidad debe ser numérica.")
+        return
+    
+    if plan_id not in PLANES_INVERSION or not (2 <= cantidad <= 1000):
+        await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (2 - 1000 USD).")
+        return
+
+    plan = PLANES_INVERSION[plan_id]
+    wallet = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u" if "Tron" in plan["red"] else "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
+    
+    await update.message.reply_text(
+        f"✅ **Inversión Registrada**\n• Plan: {plan['nombre']}\n• Monto: {cantidad} {plan['moneda']}\n\n💳 Transfiere a:\n`{wallet}`\n\n📲 Reporta con: `/notificar [Tu_Hash]`",
+        parse_mode="Markdown"
+    )
+
+# --- SISTEMA DE SOPORTE ---
+async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text("🎧 **Centro de Soporte Oficial**\n\nEscribe tu duda o problema a continuación y un operador te responderá.")
+
+async def responder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID or len(context.args) < 2:
+        return
+
+    id_destino = context.args[0]
+    mensaje_respuesta = " ".join(context.args[1:])
+
+    try:
+        await context.bot.send_message(chat_id=id_destino, text=f"💬 **Mensaje de Soporte:**\n\n{mensaje_respuesta}")
+        await update.message.reply_text(f"✅ Respuesta enviada al usuario `{id_destino}`.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    texto = update.message.text
+    if user.id == ADMIN_ID:
+        return
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT en_soporte FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row and row[0] == 1:
+        await update.message.reply_text("📩 **Mensaje recibido.** En breve será atendido por un asesor.")
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 **Nuevo Ticket de Soporte**\n\n👤 Usuario: {user.first_name} (`{user.id}`)\n💬 Mensaje: {texto}\n\n👉 Responder:\n`/responder {user.id} [Mensaje]`"
+            )
+        except Exception as e:
+            print(f"Error reenviando a admin: {e}")
+
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+
+# --- ARRANQUE DUAL: TELEGRAM EN HILO Y FLASK EN EL PRINCIPAL ---
+def run_telegram():
+    app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
+    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
+    
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    app_bot.run_polling()
+
+if __name__ == "__main__":
+    t = Thread(target=run_telegram)
+    t.daemon = True
+    t.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
