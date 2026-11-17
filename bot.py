@@ -167,9 +167,9 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO OPTIMIZADA (SIN DEMORAS) ---
+# --- TAREA EN SEGUNDO PLANO OPTIMIZADA ---
 async def bucle_comprobaciones(application):
-    await asyncio.sleep(5)  # Inicio rápido apenas arranca el bot
+    await asyncio.sleep(5)
     while True:
         try:
             ahora = datetime.now()
@@ -262,7 +262,6 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
-        # Intervalos optimizados (de 45 a 90 segundos) para mantener actividad constante sin saturar
         await asyncio.sleep(random.randint(45, 90))
 
 async def post_init(application):
@@ -769,14 +768,21 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
 async def post_init(application):
     application.create_task(bucle_comprobaciones(application))
 
-# --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
+# --- ARRANQUE DUAL ESTABLE (RENDER + EVENT LOOP FIJO) ---
 if __name__ == "__main__":
-    # 1. Lanzamos Flask en un hilo secundario independiente para mantener el puerto abierto en Render
+    # 1. Lanzar Flask en hilo secundario para Render / UptimeRobot
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    # 2. Construimos la aplicación del bot de Telegram
+    # 2. Configurar explícitamente el bucle de eventos para el hilo principal de Render
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # 3. Construir la app del bot de Telegram
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app_bot.add_handler(CommandHandler("start", start))
@@ -794,5 +800,5 @@ if __name__ == "__main__":
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    # 3. Telegram corre en el hilo principal con su bucle síncrono limpio para que responda de inmediato
+    # 4. Arrancar polling asegurando que el loop maneje la ejecución correctamente
     app_bot.run_polling()
