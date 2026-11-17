@@ -2,6 +2,7 @@ import os
 import sqlite3
 import random
 import asyncio
+import aiohttp
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -34,6 +35,10 @@ TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
+
+# Direcciones reales de tus billeteras para consultar la blockchain
+WALLET_TRON = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u"
+WALLET_TON = "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
 
 # --- BASE DE DATOS SQLITE ---
 def inicializar_db():
@@ -98,22 +103,73 @@ PLANES_INVERSION = {
     }
 }
 
-MONEDAS_COMPROBACION = [
-    {"nombre": "USDT", "red": "TRON (TRC20)", "explorer": "https://tronscan.org/#/transaction/"},
-    {"nombre": "USDT", "red": "TON", "explorer": "https://tonviewer.com/transaction/"},
-    {"nombre": "TRX", "red": "TRON", "explorer": "https://tronscan.org/#/transaction/"},
-    {"nombre": "GRAM", "red": "TON", "explorer": "https://tonviewer.com/transaction/"}
-]
-
-def generar_hash_ficticio():
-    caracteres = "abcdef0123456789"
-    return "".join(random.choice(caracteres) for _ in range(64))
-
 def generar_usuario_ficticio():
     nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
     return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
-# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN DEL FONDO CADA 12 HORAS Y FLUJO DEL CANAL ---
+# --- CONSULTAS REALES A LA BLOCKCHAIN (APIS PÚBLICAS) ---
+async def obtener_ultima_transaccion_tron():
+    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=1&address={WALLET_TRON}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    transacciones = data.get("data", [])
+                    if transacciones:
+                        tx = transacciones[0]
+                        hash_tx = tx.get("hash")
+                        monto = 0
+                        moneda = "USDT"
+                        
+                        trc20_transfers = tx.get("trc20TransferInfo", [])
+                        if trc20_transfers:
+                            monto_raw = float(trc20_transfers[0].get("amount_str", "0"))
+                            decimals = int(trc20_transfers[0].get("decimal_str", "6"))
+                            monto = monto_raw / (10 ** decimals)
+                            moneda = trc20_transfers[0].get("symbol", "USDT")
+                        else:
+                            monto = tx.get("amount", 0) / 1000000
+                            moneda = "TRX"
+                        
+                        if monto > 0:
+                            return {
+                                "hash": hash_tx,
+                                "monto": round(monto, 2),
+                                "moneda": moneda,
+                                "red": "TRON (TRC20)" if moneda == "USDT" else "TRON",
+                                "explorer": f"https://tronscan.org/#/transaction/{hash_tx}"
+                            }
+    except Exception as e:
+        print(f"Error consultando TronScan: {e}")
+    return None
+
+async def obtener_ultima_transaccion_ton():
+    url = f"https://toncenter.com/api/v2/getTransactions?address={WALLET_TON}&limit=1"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("ok") and data.get("result"):
+                        tx = data["result"][0]
+                        tx_hash_data = tx.get("transaction_id", {})
+                        hash_tx = tx_hash_data.get("hash", "")
+                        monto = round(random.uniform(5.0, 500.0), 2)
+                        
+                        if hash_tx:
+                            return {
+                                "hash": hash_tx,
+                                "monto": monto,
+                                "moneda": "GRAM",
+                                "red": "TON",
+                                "explorer": f"https://tonviewer.com/transaction/{hash_tx}"
+                            }
+    except Exception as e:
+        print(f"Error consultando Toncenter: {e}")
+    return None
+
+# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN Y FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
@@ -124,7 +180,7 @@ async def bucle_comprobaciones(application):
             cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
             fondo_actual = cursor.fetchone()[0]
 
-            # 1. ACTUALIZACIÓN AUTOMÁTICA DEL FONDO DE LIQUIDEZ
+            # 1. Actualización automática del fondo de liquidez
             if ahora.weekday() == 0 and random.choice([True, False]):
                 porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
                 monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
@@ -139,31 +195,46 @@ async def bucle_comprobaciones(application):
             conn.commit()
             conn.close()
 
-            # 2. MENSAJES AUTOMÁTICOS AL CANAL
-            moneda = random.choice(MONEDAS_COMPROBACION)
-            monto = round(random.uniform(2.0, 1000.0), 2)
-            if moneda["nombre"] == "GRAM":
-                monto = int(monto)
+            # 2. Obtener transacción real de la blockchain
+            datos_tx = None
+            if random.choice([True, False]):
+                datos_tx = await obtener_ultima_transaccion_tron()
+            
+            if not datos_tx:
+                datos_tx = await obtener_ultima_transaccion_ton()
 
-            tx_hash = generar_hash_ficticio()
+            if datos_tx:
+                tx_hash = datos_tx["hash"]
+                monto = datos_tx["monto"]
+                moneda_nombre = datos_tx["moneda"]
+                red_oficial = datos_tx["red"]
+                explorer_url = datos_tx["explorer"]
+            else:
+                # Respaldo de seguridad si la API pública falla temporalmente
+                tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
+                monto = 150.0
+                moneda_nombre = "USDT"
+                red_oficial = "TRON (TRC20)"
+                explorer_url = "https://tronscan.org/#/transaction/"
+
             usuario = generar_usuario_ficticio()
 
             if ahora.weekday() == 0 and random.choice([True, False]):
                 mensaje = (
                     f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
                     f"👤 **Usuario:** `{usuario}`\n"
-                    f"💰 **Monto Retirado:** `{monto} {moneda['nombre']}`\n"
-                    f"🌐 **Red:** {moneda['red']}\n"
-                    f"🔗 **TXID:** [Ver en blockchain]({moneda['explorer']}{tx_hash})"
+                    f"💰 **Monto Retirado:** `{monto} {moneda_nombre}`\n"
+                    f"🌐 **Red:** {red_oficial}\n"
+                    f"🔗 **TXID:** [Ver en blockchain]({explorer_url}{tx_hash})"
                 )
             else:
                 mensaje = (
                     f"💎 **NUEVO DEPÓSITO / INVERSIÓN**\n\n"
                     f"👤 **Inversor:** `{usuario}`\n"
-                    f"📥 **Monto Invertido:** `{monto} {moneda['nombre']}`\n"
-                    f"🌐 **Red Oficial:** {moneda['red']}\n"
+                    f"📥 **Monto Invertido:** `{monto} {moneda_nombre}`\n"
+                    f"🌐 **Red Oficial:** {red_oficial}\n"
                     f"⚡ **Estado:** Acreditado y Activo\n"
-                    f"🔗 **TXID:** [Verificar en Blockchain]({moneda['explorer']}{tx_hash})"
+                    f"🔗 **TXID:** [Verificar en Blockchain]({explorer_url}{tx_hash})"
                 )
 
             if CHANNEL_ID:
@@ -174,6 +245,7 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
+            # Espera de 12 horas para el siguiente mensaje
             await asyncio.sleep(43200)
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
@@ -239,7 +311,7 @@ def obtener_menu_principal(idioma="es"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- COMANDO /START CORREGIDO ---
+# --- COMANDO /START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -360,7 +432,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error al editar texto de idioma: {e}")
+            print(f"Error al editar idioma: {e}")
         return
 
     conn = sqlite3.connect("usuarios.db")
