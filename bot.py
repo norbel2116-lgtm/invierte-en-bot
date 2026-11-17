@@ -37,11 +37,9 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
 
-# Direcciones reales de tus billeteras para consultar la blockchain
 WALLET_TRON = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u"
 WALLET_TON = "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
 
-# --- BASE DE DATOS SQLITE ---
 def inicializar_db():
     conn = sqlite3.connect("usuarios.db")
     cursor = conn.cursor()
@@ -108,7 +106,6 @@ def generar_usuario_ficticio():
     nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
     return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
-# --- CONSULTAS REALES A LA BLOCKCHAIN (APIS PÚBLICAS) ---
 async def obtener_ultima_transaccion_tron():
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=1&address={WALLET_TRON}"
     try:
@@ -170,7 +167,6 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN Y FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
@@ -181,7 +177,6 @@ async def bucle_comprobaciones(application):
             cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
             fondo_actual = cursor.fetchone()[0]
 
-            # 1. Actualización automática del fondo de liquidez
             if ahora.weekday() == 0 and random.choice([True, False]):
                 porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
                 monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
@@ -196,7 +191,6 @@ async def bucle_comprobaciones(application):
             conn.commit()
             conn.close()
 
-            # 2. Obtener transacción real de la blockchain
             datos_tx = None
             if random.choice([True, False]):
                 datos_tx = await obtener_ultima_transaccion_tron()
@@ -253,7 +247,6 @@ async def bucle_comprobaciones(application):
 async def post_init(application):
     application.create_task(bucle_comprobaciones(application))
 
-# --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
         [
@@ -310,7 +303,6 @@ def obtener_menu_principal(idioma="es"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- COMANDO /START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -350,7 +342,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -385,7 +376,6 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
             f"• Transparencia total sin letras pequeñas."
         )
 
-# --- MANEJADOR DE CLICS (CALLBACKS) ---
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -562,7 +552,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-# --- COMANDOS TRADICIONALES DE TEXTO ---
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
@@ -586,7 +575,6 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
     hash_tx = " ".join(context.args)
     await update.message.reply_text(f"⏳ Comprobante recibido (`{hash_tx}`). En proceso de verificación.")
 
-# --- APROBAR DEPÓSITO Y NOTIFICAR 4 NIVELES DE PATROCINADORES ---
 async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id != ADMIN_ID:
@@ -628,4 +616,21 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         comision = monto * porcentaje
         
         cursor.execute(
-            "UPDATE usuarios SET ganancias_refer
+            "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+            (comision, patrocinador_id)
+        )
+        conn.commit()
+        
+        try:
+            await context.bot.send_message(
+                chat_id=patrocinador_id,
+                text=(
+                    f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                    f"• Uno de tus referidos ha invertido.\n"
+                    f"• Has ganado: **{comision:.2f} {moneda}** (Comisión del {porcentaje*100}%)."
+                )
+            )
+        except Exception as e:
+            print(f"No se pudo notificar al patrocinador {patrocinador_id} en el nivel {nivel}: {e}")
+            
+        patrocinador_actual = patrocinador_
