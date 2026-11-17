@@ -53,6 +53,19 @@ def inicializar_db():
             idioma TEXT DEFAULT 'es'
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS liquidez_global (
+            id INTEGER PRIMARY KEY,
+            fondo_actual REAL,
+            ultima_actualizacion TEXT
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) FROM liquidez_global")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute(
+            "INSERT INTO liquidez_global (id, fondo_actual, ultima_actualizacion) VALUES (1, ?, ?)",
+            (124500.00, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
     conn.commit()
     conn.close()
 
@@ -100,15 +113,36 @@ def generar_usuario_ficticio():
     nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
     return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
-# --- TAREA EN SEGUNDO PLANO: FLUJO AUTOMÁTICO PARA EL CANAL ---
+# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN DEL FONDO CADA 12 HORAS Y FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
         try:
             ahora = datetime.now()
+            conn = sqlite3.connect("usuarios.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+            fondo_actual = cursor.fetchone()[0]
+
+            # 1. ACTUALIZACIÓN AUTOMÁTICA DEL FONDO DE LIQUIDEZ
+            if ahora.weekday() == 0 and random.choice([True, False]):
+                # Lunes: Disminuye de 15% a 35% por retiros
+                porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
+                monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
+                fondo_actual = max(100000.0, fondo_actual - monto_restar)
+            else:
+                # Resto de ciclos (cada 12h): Aumenta de 0.5% a 4.6%
+                porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
+                monto_sumar = fondo_actual * (porcentaje_subida / 100.0)
+                fondo_actual += monto_sumar
+
+            cursor.execute("UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacion = ? WHERE id = 1", 
+                           (fondo_actual, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+            conn.close()
+
+            # 2. MENSAJES AUTOMÁTICOS AL CANAL
             moneda = random.choice(MONEDAS_COMPROBACION)
-            
-            # Monto variable entre 2 USD y 1000 USD
             monto = round(random.uniform(2.0, 1000.0), 2)
             if moneda["nombre"] == "GRAM":
                 monto = int(monto)
@@ -116,17 +150,13 @@ async def bucle_comprobaciones(application):
             tx_hash = generar_hash_ficticio()
             usuario = generar_usuario_ficticio()
 
-            # LUNES: Puede haber depósitos o retiros (estos últimos con reducción del 20% al 30%)
-            # RESTO DE DÍAS (Martes a Domingo): Exclusivamente depósitos e inversiones.
             if ahora.weekday() == 0 and random.choice([True, False]):
-                porcentaje_bajada = round(random.uniform(20.0, 30.0), 1)
                 mensaje = (
                     f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
                     f"👤 **Usuario:** `{usuario}`\n"
                     f"💰 **Monto Retirado:** `{monto} {moneda['nombre']}`\n"
-                    f"📉 **Ajuste de Liquidez:** `-{porcentaje_bajada}%`\n"
                     f"🌐 **Red:** {moneda['red']}\n"
-                    f"🔗 **TXID (Verificable en Blockchain):** [Ver en explorador]({moneda['explorer']}{tx_hash})"
+                    f"🔗 **TXID:** [Ver en blockchain]({moneda['explorer']}{tx_hash})"
                 )
             else:
                 mensaje = (
@@ -135,7 +165,7 @@ async def bucle_comprobaciones(application):
                     f"📥 **Monto Invertido:** `{monto} {moneda['nombre']}`\n"
                     f"🌐 **Red Oficial:** {moneda['red']}\n"
                     f"⚡ **Estado:** Acreditado y Activo\n"
-                    f"🔗 **TXID (Verificable en Blockchain):** [Verificar en Blockchain]({moneda['explorer']}{tx_hash})"
+                    f"🔗 **TXID:** [Verificar en Blockchain]({moneda['explorer']}{tx_hash})"
                 )
 
             if CHANNEL_ID:
@@ -146,9 +176,8 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
-            # Frecuencia aleatoria entre 30 min (1800s) y 2 horas (7200s)
-            espera = random.randint(1800, 7200)  
-            await asyncio.sleep(espera)
+            # Espera exacta de 12 horas (43200 segundos) para la siguiente actualización del fondo
+            await asyncio.sleep(43200)
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
             await asyncio.sleep(60)
@@ -171,17 +200,18 @@ def obtener_menu_principal(idioma="es"):
         keyboard = [
             [
                 InlineKeyboardButton("💰 My Balance", callback_data="btn_saldo"),
-                InlineKeyboardButton("📋 Plans", callback_data="btn_planes")
+                InlineKeyboardButton("🏦 Liquidity Pool", callback_data="btn_liquidez")
             ],
             [
-                InlineKeyboardButton("💳 Deposit", callback_data="btn_depositar"),
-                InlineKeyboardButton("👥 Referrals", callback_data="btn_referidos")
+                InlineKeyboardButton("📋 Plans", callback_data="btn_planes"),
+                InlineKeyboardButton("💳 Deposit", callback_data="btn_depositar")
             ],
             [
-                InlineKeyboardButton("🏦 Withdraw", callback_data="btn_retirar"),
-                InlineKeyboardButton("🎧 Support", callback_data="btn_soporte")
+                InlineKeyboardButton("👥 Referrals", callback_data="btn_referidos"),
+                InlineKeyboardButton("🏦 Withdraw", callback_data="btn_retirar")
             ],
             [
+                InlineKeyboardButton("🎧 Support", callback_data="btn_soporte"),
                 InlineKeyboardButton("📢 Proofs Channel", url=LINK_CANAL)
             ],
             [
@@ -192,17 +222,18 @@ def obtener_menu_principal(idioma="es"):
         keyboard = [
             [
                 InlineKeyboardButton("💰 Mi Saldo", callback_data="btn_saldo"),
-                InlineKeyboardButton("📋 Planes", callback_data="btn_planes")
+                InlineKeyboardButton("🏦 Fondo de Liquidez", callback_data="btn_liquidez")
             ],
             [
-                InlineKeyboardButton("💳 Depositar", callback_data="btn_depositar"),
-                InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos")
+                InlineKeyboardButton("📋 Planes", callback_data="btn_planes"),
+                InlineKeyboardButton("💳 Depositar", callback_data="btn_depositar")
             ],
             [
-                InlineKeyboardButton("🏦 Retirar", callback_data="btn_retirar"),
-                InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte")
+                InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
+                InlineKeyboardButton("🏦 Retirar", callback_data="btn_retirar")
             ],
             [
+                InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
                 InlineKeyboardButton("📢 Canal de Comprobantes", url=LINK_CANAL)
             ],
             [
@@ -303,8 +334,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🛡️ **Welcome to Invest Bot (Secure Multi-network)**\n\n"
                 f"Hello, **{user.first_name}**. You are in a transparent platform to manage crypto investments safely.\n\n"
                 f"✅ **Why trust us?**\n"
-                f"• Weekly payouts processed on Mondays (with withdrawals and deposits).\n"
-                f"• Real-time blockchain verifiable proofs (24/7 activity).\n"
+                f"• Payouts processed strictly on Mondays.\n"
+                f"• Real-time blockchain verifiable proofs.\n"
                 f"• Automated multi-level system.\n\n"
                 f"⚠️ **Important Note:** Please **do not spam buttons**. Give the bot a few seconds to respond.\n\n"
                 f"👇 **Choose an option below:**"
@@ -314,7 +345,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🛡️ **Bienvenido a Invierte Bot (Multired Segura)**\n\n"
                 f"Hola, **{user.first_name}**. Estás en una plataforma transparente y automatizada para gestionar tus inversiones con seguridad.\n\n"
                 f"✅ **¿Por qué confiar en nosotros?**\n"
-                f"• Pagos y retiros procesados los lunes, con depósitos constantes toda la semana.\n"
+                f"• Pagos procesados estrictamente los lunes.\n"
                 f"• Comprobantes verificables en la blockchain en tiempo real.\n"
                 f"• Sistema multinivel automatizado.\n\n"
                 f"⚠️ **Nota Importante:** Por favor, **no presiones los botones muy rápido**. Dale unos segundos al bot para responder.\n\n"
@@ -353,16 +384,39 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tasa_diaria = random.uniform(0.015, 0.048)
                 saldo_simulado += saldo_simulado * tasa_diaria
             
-            texto = f"💰 **Live Balance (Variable 1.5% - 4.8% Daily):**\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 **Tu Balance y Rendimiento en Vivo (Variable 1.5% - 4.8% Diario):**\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
+            texto = f"💰 **Live Balance:**\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 **Tu Balance y Rendimiento en Vivo:**\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
         
+        await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+
+    elif data == "btn_liquidez":
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        fondo_actual = row[0] if row else 124500.00
+
+        if idioma == "en":
+            texto = (
+                f"🏦 **Platform Global Liquidity Pool**\n\n"
+                f"• **Current Liquidity Reserve:** `${fondo_actual:,.2f} USD`\n"
+                f"• **Status:** Active & Backed Across Multinetworks (TRON & TON)\n\n"
+                f"💡 *Guaranteed operational backing ensuring transparent and automated processing for all platform members.*"
+            )
+        else:
+            texto = (
+                f"🏦 **Fondo de Liquidez Global de la Plataforma**\n\n"
+                f"• **Reserva de Liquidez Actual:** `${fondo_actual:,.2f} USD`\n"
+                f"• **Estado:** Activo y Respaldado en Redes Multired (TRON & TON)\n\n"
+                f"💡 *Respaldo operativo garantizado que asegura la estabilidad y procesamiento automatizado para todos los miembros.*"
+            )
         await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
     elif data == "btn_planes":
         if idioma == "en":
             texto = (
                 "📋 **Investment Plans & Yields:**\n"
-                "🔹 **Daily Deposits & Yield:** 1.5% to 4.8% variable\n"
-                "🔹 **Monday Payouts:** Withdrawals & liquidity adjustment (-20% to -30%)\n"
+                "🔹 **Daily Yield:** 1.5% to 4.8% variable\n"
                 "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
@@ -370,8 +424,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             texto = (
                 "📋 **Planes de Inversión y Rendimientos:**\n"
-                "🔹 **Depósitos Diarios:** Rendimiento variable del 1.5% al 4.8%\n"
-                "🔹 **Lunes (Retiros y Pagos):** Ajuste del -20% al -30% con depósitos mixtos\n"
+                "🔹 **Rendimiento Diario:** Variable del 1.5% al 4.8%\n"
                 "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
@@ -401,7 +454,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
     elif data == "btn_retirar":
-        texto = "🏦 **Withdrawals**: Processed **every Monday** with a weekly liquidity adjustment (-20% to -30%)." if idioma == "en" else "🏦 **Sistema de Retiros**: Los pagos se procesan **todos los lunes** con el ajuste semanal de retiros del -20% al -30%."
+        texto = "🏦 **Withdrawals**: Processed **every Monday** automatically to your verified wallet." if idioma == "en" else "🏦 **Sistema de Retiros**: Los pagos se procesan **todos los lunes** de forma automatizada a tu billetera verificada."
         await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
     elif data == "btn_soporte":
@@ -420,8 +473,7 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "📋 **Planes de Inversión y Rendimientos:**\n"
-        "🔹 **Depósitos Diarios:** 1.5% a 4.8%\n"
-        "🔹 **Lunes:** Retiros y pagos (-20% a -30%) con flujo mixto\n"
+        "🔹 **Rendimiento Diario:** 1.5% a 4.8%\n"
         "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
     )
     for key, plan in PLANES_INVERSION.items():
@@ -523,7 +575,7 @@ async def referidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏦 Los retiros se procesan **todos los lunes** con el ajuste semanal del -20% al -30%.", reply_markup=obtener_menu_principal('es'))
+    await update.message.reply_text("🏦 Los retiros se procesan **todos los lunes** de forma automatizada.", reply_markup=obtener_menu_principal('es'))
 
 async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
