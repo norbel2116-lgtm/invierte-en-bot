@@ -21,7 +21,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "OK", 200
+    return "Bot Activo y Funcionando Correctamente", 200
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -167,9 +167,9 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO: FLUJO EQUILIBRADO 50/50 (TRON Y TON) ---
+# --- TAREA EN SEGUNDO PLANO OPTIMIZADA (SIN DEMORAS) ---
 async def bucle_comprobaciones(application):
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)  # Inicio rápido apenas arranca el bot
     while True:
         try:
             ahora = datetime.now()
@@ -195,7 +195,6 @@ async def bucle_comprobaciones(application):
 
             datos_tx = None
             try:
-                # 50% de probabilidad real para elegir entre TRON y TON por igual
                 usar_tron = random.choice([True, False])
                 if usar_tron:
                     datos_tx = await obtener_ultima_transaccion_tron()
@@ -215,7 +214,6 @@ async def bucle_comprobaciones(application):
                 red_oficial = datos_tx["red"]
                 explorer_url = datos_tx["explorer"]
             else:
-                # Datos simulados con balanceo equitativo de red si la API pública demora
                 es_red_ton = random.choice([True, False])
                 if es_red_ton:
                     tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
@@ -264,9 +262,8 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
-        # Intervalos optimizados (de 30 segundos a 3 minutos)
-        intervalos_posibles = [30, 60, 90, 120, 180]
-        await asyncio.sleep(random.choice(intervalos_posibles))
+        # Intervalos optimizados (de 45 a 90 segundos) para mantener actividad constante sin saturar
+        await asyncio.sleep(random.randint(45, 90))
 
 async def post_init(application):
     application.create_task(bucle_comprobaciones(application))
@@ -368,7 +365,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS (ACTUALIZADO) ---
+# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -769,9 +766,12 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
+async def post_init(application):
+    application.create_task(bucle_comprobaciones(application))
+
 # --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
 if __name__ == "__main__":
-    # 1. Lanzamos Flask en un hilo secundario independiente para atender a Render y UptimeRobot al instante
+    # 1. Lanzamos Flask en un hilo secundario independiente para mantener el puerto abierto en Render
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
