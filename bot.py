@@ -402,6 +402,7 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
             f"✔ Acompañamiento constante con guías y orientación.\n"
             f"✔ Transparencia total, sin letras pequeñas."
         )
+
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -765,12 +766,14 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
-# --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
-if __name__ == "__main__":
+# --- ARRANQUE PRINCIPAL CORREGIDO (EVITA CONFLICTO DE EVENT LOOP) ---
+async def main():
+    # 1. Lanzamos Flask en segundo plano
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
+    # 2. Inicializamos la aplicación de Telegram
     app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app_bot.add_handler(CommandHandler("start", start))
@@ -788,4 +791,19 @@ if __name__ == "__main__":
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    app_bot.run_polling()
+    # 3. Arrancamos de forma nativa con el event loop principal
+    await app_bot.initialize()
+    await app_bot.start()
+    await app_bot.updater.start_polling()
+    
+    # Mantiene el bot corriendo indefinidamente
+    stop_event = asyncio.Event()
+    await stop_event.wait()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot detenido correctamente.")
+
+
