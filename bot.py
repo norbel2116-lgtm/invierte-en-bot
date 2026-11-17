@@ -16,7 +16,7 @@ from telegram.ext import (
 from flask import Flask
 from threading import Thread
 
-# --- SERVIDOR WEB FLASK (HILO PRINCIPAL PARA RENDER) ---
+# --- SERVIDOR WEB FLASK (HILO PRINCIPAL PARA RENDER Y UPTIMEROBOT) ---
 app = Flask('')
 
 @app.route('/')
@@ -160,7 +160,7 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN Y FLUJO DEL CANAL ---
+# --- TAREA EN SEGUNDO PLANO: FLUJO DEL CANAL (20 MIN A 1 HORA) ---
 async def bucle_comprobaciones(application):
     await asyncio.sleep(15)
     while True:
@@ -200,7 +200,7 @@ async def bucle_comprobaciones(application):
                 explorer_url = datos_tx["explorer"]
             else:
                 tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
-                monto = 150.0
+                monto = round(random.uniform(3.0, 1500.0), 2)
                 moneda_nombre = "USDT"
                 red_oficial = "TRON (TRC20)"
                 explorer_url = "https://tronscan.org/#/transaction/"
@@ -233,7 +233,8 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
-            await asyncio.sleep(43200)
+            # Intervalo dinámico de 20 min (1200s) a 1 hora (3600s)
+            await asyncio.sleep(random.randint(1200, 3600))
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
             await asyncio.sleep(60)
@@ -670,7 +671,7 @@ async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cantidad = float(context.args[1])
     except ValueError:
-        await update.message.reply_text("❌ La cantidad должна ser numérica.")
+        await update.message.reply_text("❌ La cantidad debe ser numérica.")
         return
     
     if plan_id not in PLANES_INVERSION or not (2 <= cantidad <= 1000):
