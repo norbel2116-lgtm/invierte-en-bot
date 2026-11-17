@@ -199,11 +199,11 @@ async def bucle_comprobaciones(application):
                 usar_tron = random.choice([True, False])
                 if usar_tron:
                     datos_tx = await obtener_ultima_transaccion_tron()
-                    if not datos_tx:  # Si Tron falla, intenta con Ton de respaldo
+                    if not datos_tx:  
                         datos_tx = await obtener_ultima_transaccion_ton()
                 else:
                     datos_tx = await obtener_ultima_transaccion_ton()
-                    if not datos_tx:  # Si Ton falla, intenta con Tron de respaldo
+                    if not datos_tx:  
                         datos_tx = await obtener_ultima_transaccion_tron()
             except Exception as blockchain_err:
                 print(f"Aviso en consulta blockchain: {blockchain_err}")
@@ -264,7 +264,7 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
-        # Intervalos optimizados y más dinámicos (de 30 segundos a 3 minutos para que el canal tenga buen movimiento)
+        # Intervalos optimizados (de 30 segundos a 3 minutos)
         intervalos_posibles = [30, 60, 90, 120, 180]
         await asyncio.sleep(random.choice(intervalos_posibles))
 
@@ -368,39 +368,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
+# --- GENERADOR DEL MENSAJE DE REFERIDOS (ACTUALIZADO) ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
     if idioma == "en":
         return (
             f"🌟 **Welcome! We are glad you want to join**\n\n"
-            f"Thank you for your interest in joining our community. Here is all the detailed information about our **insertion plans** and platform access.\n\n"
+            f"Thank you for your interest in joining our community. We want your experience to be completely transparent, secure, and automated.\n\n"
+            f"Here is all the detailed information about our insertion plans:\n\n"
             f"🚀 **Your Exclusive Referral Link:**\n"
             f"`{link_referido}`\n\n"
             f"📊 **Available Insertion Plans:**\n"
-            f"1. **Starter Plan (Basic):** Ideal for first steps. Essential tools and standard community commissions.\n"
-            f"2. **Growth Plan (Advanced):** Automation tools, exclusive promotional material, and priority support.\n"
-            f"3. **Pro / Elite Plan (Custom):** For team leaders and digital professionals with customized benefits.\n\n"
+            f"• **Starter Plan (Basic - 0.7% every 7 days):** Ideal for taking first steps and exploring the platform without major commitments. *(Min: 3 USD)*\n"
+            f"• **Growth Plan (Advanced - 1.2% every 7 days):** Automation tools, promotional material, and priority support. *(Min: 5 USD)*\n"
+            f"• **Pro / Elite Plan (Custom - 2.6% every 7 days):** Designed for team leaders and digital professionals. *(Min: 10 USD)*\n\n"
             f"💡 **Why join through this link?**\n"
-            f"• Guaranteed correct network placement.\n"
-            f"• Dedicated guides and support.\n"
-            f"• Full transparency from day one."
+            f"✔ Security and backing of being properly linked to our network.\n"
+            f"✔ Constant support with guides and orientation.\n"
+            f"✔ Total transparency, no small print."
         )
     else:
         return (
             f"🌟 **¡Bienvenido/a! Nos alegra mucho que quieras sumarte**\n\n"
-            f"Gracias por tu interés en formar parte de nuestra comunidad. Queremos que tu experiencia sea transparente y segura. Aquí tienes toda la información detallada sobre nuestros **planes de inserción**.\n\n"
+            f"Gracias por tu interés en formar parte de nuestra comunidad. Queremos que tu experiencia sea totalmente transparente, segura y automatizada.\n\n"
+            f"Aquí tienes toda la información detallada sobre nuestros planes de inserción:\n\n"
             f"🚀 **Tu Link de Referido Exclusivo:**\n"
             f"`{link_referido}`\n\n"
             f"📊 **Planes de Inserción Disponibles:**\n"
-            f"1. **Plan de Inicio (Básico):** Ideal para dar los primeros pasos y explorar la plataforma sin grandes compromisos.\n"
-            f"2. **Plan Crecimiento (Avanzado):** Herramientas de automatización, material promocional y soporte prioritario.\n"
-            f"3. **Plan Pro / Élite (Personalizado):** Diseñado para líderes de equipos y profesionales del sector digital.\n\n"
+            f"• **Plan de Inicio (Básico - 0.7% cada 7 días):** Ideal para dar los primeros pasos y explorar la plataforma sin grandes compromisos. *(Mín: 3 USD)*\n"
+            f"• **Plan Crecimiento (Avanzado - 1.2% cada 7 días):** Herramientas de automatización, material promocional y soporte prioritario. *(Mín: 5 USD)*\n"
+            f"• **Plan Pro / Élite (Personalizado - 2.6% cada 7 días):** Diseñado para líderes de equipos y profesionales del sector digital. *(Mín: 10 USD)*\n\n"
             f"💡 **¿Por qué unirte a través de este enlace?**\n"
-            f"• Seguridad y respaldo de quedar vinculado/a correctamente a nuestra red.\n"
-            f"• Acompañamiento con guías y orientación.\n"
-            f"• Transparencia total sin letras pequeñas."
+            f"✔ Seguridad y respaldo de quedar vinculado/a correctamente a nuestra red.\n"
+            f"✔ Acompañamiento constante con guías y orientación.\n"
+            f"✔ Transparencia total, sin letras pequeñas."
         )
 
 # --- MANEJADOR DE CLICS (CALLBACKS) ---
@@ -515,7 +517,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if idioma == "en":
             texto = (
                 "📋 **Investment Plans & Yields:**\n"
-                "🔹 **Daily Yield:** 1.5% to 4.8% variable\n"
+                "🔹 **Daily Yield:** Variable\n"
                 "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
@@ -523,8 +525,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             texto = (
                 "📋 **Planes de Inversión y Rendimientos:**\n"
-                "🔹 **Rendimiento Diario:** Variable del 1.5% al 4.8%\n"
-                "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
+                "🔹 **Rendimiento:** 0.7%, 1.2% y 2.6% cada 7 días\n"
+                "🔹 **Límites:** Mínimo: 3 USD | Máximo: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
                 texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
@@ -587,8 +589,8 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "📋 **Planes de Inversión y Rendimientos:**\n"
-        "🔹 **Rendimiento Diario:** 1.5% a 4.8%\n"
-        "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
+        "🔹 **Rendimiento:** 0.7%, 1.2% y 2.6% cada 7 días\n"
+        "🔹 **Límites:** Mínimo: 3 USD | Máximo: 1000 USD\n\n"
     )
     for key, plan in PLANES_INVERSION.items():
         texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
@@ -703,8 +705,8 @@ async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ La cantidad debe ser numérica.")
         return
     
-    if plan_id not in PLANES_INVERSION or not (2 <= cantidad <= 1000):
-        await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (2 - 1000 USD).")
+    if plan_id not in PLANES_INVERSION or not (3 <= cantidad <= 1000):
+        await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (3 - 1000 USD).")
         return
 
     plan = PLANES_INVERSION[plan_id]
