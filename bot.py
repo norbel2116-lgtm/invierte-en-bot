@@ -249,11 +249,12 @@ async def bucle_comprobaciones(application):
         except Exception as e:
             print(f"Error en bucle de comprobaciones: {e}")
 
-        # Intervalos variados en segundos (de 3 a 10 min)
+        # Intervalos variados seguros (de 3 a 35 min)
         intervalos_posibles = [180, 300, 450, 600, 1200, 2100]
         await asyncio.sleep(random.choice(intervalos_posibles))
 
 async def post_init(application):
+    # Solución clave para evitar el error de Application.create_task antes de arrancar
     asyncio.create_task(bucle_comprobaciones(application))
 
 # --- TECLADOS INLINE ---
@@ -441,112 +442,4 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor = conn.cursor()
     cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
     row = cursor.fetchone()
-    conn.close()
-    idioma = row[0] if row else 'es'
-
-    if data == "btn_saldo":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT deposito_activo, moneda_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?", (user.id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if not row or not row[0] or row[0] == 0:
-            texto = "💰 **Balance:** 0 USD\n⚠️ No active investments. Use `/planes` to start." if idioma == "en" else "💰 **Tu Balance Actual:**\n\n• Capital Depositado: **0 USD**\n⚠️ No tienes inversiones activas."
-        else:
-            deposito, moneda, fecha_str, ganancia_ref = row
-            dias_transcurridos = (datetime.now() - datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")).days if fecha_str else 0
-            
-            saldo_simulado = deposito
-            for _ in range(dias_transcurridos):
-                tasa_diaria = random.uniform(0.015, 0.048)
-                saldo_simulado += saldo_simulado * tasa_diaria
-            
-            texto = f"💰 **Live Balance:**\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 **Tu Balance y Rendimiento en Vivo:**\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
-        
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
-
-    elif data == "btn_liquidez":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-        row = cursor.fetchone()
-        conn.close()
-        fondo_actual = row[0] if row else 124500.00
-
-        if idioma == "en":
-            texto = (
-                f"🏦 **Platform Global Liquidity Pool**\n\n"
-                f"• **Current Liquidity Reserve:** `${fondo_actual:,.2f} USD`\n"
-                f"• **Status:** Active & Backed Across Multinetworks (TRON & TON)\n\n"
-                f"💡 *Guaranteed operational backing ensuring transparent and automated processing for all platform members.*"
-            )
-        else:
-            texto = (
-                f"🏦 **Fondo de Liquidez Global de la Plataforma**\n\n"
-                f"• **Reserva de Liquidez Actual:** `${fondo_actual:,.2f} USD`\n"
-                f"• **Estado:** Activo y Respaldado en Redes Multired (TRON & TON)\n\n"
-                f"💡 *Respaldo operativo garantizado que asegura la estabilidad y procesamiento automatizado para todos los miembros.*"
-            )
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
-
-    elif data == "btn_planes":
-        if idioma == "en":
-            texto = (
-                "📋 **Investment Plans & Yields:**\n"
-                "🔹 **Daily Yield:** 1.5% to 4.8% variable\n"
-                "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n\n"
-            )
-            for key, plan in PLANES_INVERSION.items():
-                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Accepted: {plan['moneda']}\n   • Networks: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
-        else:
-            texto = (
-                "📋 **Planes de Inversión y Rendimientos:**\n"
-                "🔹 **Rendimiento Diario:** Variable del 1.5% al 4.8%\n"
-                "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
-            )
-            for key, plan in PLANES_INVERSION.items():
-                texto += f"🔹 **ID {key}: {plan['nombre']}**\n   • Divisas: {plan['moneda']}\n   • Redes: {plan['red']}\n   • ℹ️ {plan['detalle']}\n\n"
-        
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
-
-    elif data == "btn_depositar":
-        if idioma == "en":
-            texto = (
-                "💳 **Official Deposit Wallets**:\n\n"
-                "🔹 **TRON Network (TRX & USDT TRC20):**\n`TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u`\n\n"
-                "🔹 **TON Network (GRAM & USDT TON):**\n`UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v`\n\n"
-                "⚠️ Report transfer with: `/notificar [Your_Hash]`"
-            )
-        else:
-            texto = (
-                "💳 **Direcciones de Depósito Oficiales**:\n\n"
-                "🔹 **Red TRON (TRX y USDT TRC20):**\n`TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u`\n\n"
-                "🔹 **Red TON (GRAM y USDT TON):**\n`UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v`\n\n"
-                "⚠️ Tras transferir, reporta con: `/notificar [Tu_Hash]`"
-            )
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
-
-    elif data == "btn_referidos":
-        texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
-
-    elif data == "btn_retirar":
-        texto = "🏦 **Withdrawals**: Processed **every Monday** automatically to your verified wallet." if idioma == "en" else "🏦 **Sistema de Retiros**: Los pagos se procesan **todos los lunes** de forma automatizada a tu billetera verificada."
-        try:
-            await query
+    conn.
