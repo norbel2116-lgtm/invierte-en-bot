@@ -2,7 +2,6 @@ import os
 import sqlite3
 import random
 import asyncio
-import aiohttp
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -13,31 +12,31 @@ MessageHandler,
 filters,
 ContextTypes
 )
+
 from flask import Flask
 from threading import Thread
 
---- SERVIDOR WEB FLASK (HILO SECUNDARIO) ---
 app = Flask('')
 
 @app.route('/')
 def home():
-return "Bot Activo y Funcionando Correctamente", 200
+return "¡Bot multired activo y funcionando!"
 
 def run_web():
 port = int(os.environ.get("PORT", 10000))
-app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+t = Thread(target=run_web)
+t.start()
 
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")
  ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
 
-WALLET_TRON = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u"
-WALLET_TON = "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
-
 --- BASE DE DATOS SQLITE ---
 def inicializar_db():
-try:
 conn = sqlite3.connect("usuarios.db")
 cursor = conn.cursor()
 cursor.execute("""
@@ -69,8 +68,6 @@ cursor.execute(
 )
 conn.commit()
 conn.close()
-except Exception as e:
-print(f"Error inicializando BD: {e}")
 
 inicializar_db()
 
@@ -101,89 +98,40 @@ PLANES_INVERSION = {
 }
 }
 
+MONEDAS_COMPROBACION = [
+{"nombre": "USDT", "red": "TRON (TRC20)", "explorer": "https://tronscan.org/#/transaction/"},
+{"nombre": "USDT", "red": "TON", "explorer": "https://tonviewer.com/transaction/"},
+{"nombre": "TRX", "red": "TRON", "explorer": "https://tronscan.org/#/transaction/"},
+{"nombre": "GRAM", "red": "TON", "explorer": "https://tonviewer.com/transaction/"}
+]
+
+def generar_hash_ficticio():
+caracteres = "abcdef0123456789"
+return "".join(random.choice(caracteres) for _ in range(64))
+
 def generar_usuario_ficticio():
 nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
 return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
---- CONSULTAS REALES A LA BLOCKCHAIN (APIS PÚBLICAS) ---
-async def obtener_ultima_transaccion_tron():
-url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=1&address={WALLET_TRON}"
-try:
-async with aiohttp.ClientSession() as session:
-async with session.get(url, timeout=10) as response:
-if response.status == 200:
-data = await response.json()
-transacciones = data.get("data", [])
-if transacciones:
-tx = transacciones[0]
-hash_tx = tx.get("hash")
-monto = 0
-moneda = "USDT"
-
-trc20_transfers = tx.get("trc20TransferInfo", [])
-if trc20_transfers:
-monto_raw = float(trc20_transfers[0].get("amount_str", "0"))
-decimals = int(trc20_transfers[0].get("decimal_str", "6"))
-monto = monto_raw / (10 ** decimals)
-moneda = trc20_transfers[0].get("symbol", "USDT")
-else:
-monto = tx.get("amount", 0) / 1000000
-moneda = "TRX"
-
-if monto > 0:
-return {
-"hash": hash_tx,
-"monto": round(monto, 2),
-"moneda": moneda,
-"red": "TRON (TRC20)" if moneda == "USDT" else "TRON",
-"explorer": f"https://tronscan.org/#/transaction/{hash_tx}"
-}
-except Exception as e:
-print(f"Error consultando TronScan: {e}")
-return None
-
-async def obtener_ultima_transaccion_ton():
-url = f"https://toncenter.com/api/v2/getTransactions?address={WALLET_TON}&limit=1"
-try:
-async with aiohttp.ClientSession() as session:
-async with session.get(url, timeout=10) as response:
-if response.status == 200:
-data = await response.json()
-if data.get("ok") and data.get("result"):
-tx = data["result"][0]
-tx_hash_data = tx.get("transaction_id", {})
-hash_tx = tx_hash_data.get("hash", "")
-monto = round(random.uniform(10.0, 450.0), 2)
-
-if hash_tx:
-return {
-"hash": hash_tx,
-"monto": monto,
-"moneda": random.choice(["GRAM", "USDT"]),
-"red": "TON (Jetton/TON)",
-"explorer": f"https://tonviewer.com/transaction/{hash_tx}"
-}
-except Exception as e:
-print(f"Error consultando Toncenter: {e}")
-return None
-
---- TAREA EN SEGUNDO PLANO OPTIMIZADA ---
+--- TAREA EN SEGUNDO PLANO: ACTUALIZACIÓN DEL FONDO CADA 12 HORAS Y FLUJO DEL CANAL ---
 async def bucle_comprobaciones(application):
-await asyncio.sleep(5)
+await asyncio.sleep(15)
 while True:
 try:
 ahora = datetime.now()
 conn = sqlite3.connect("usuarios.db")
 cursor = conn.cursor()
 cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-row_fondo = cursor.fetchone()
-fondo_actual = row_fondo[0] if row_fondo else 124500.00
+fondo_actual = cursor.fetchone()[0]
 
+# 1. ACTUALIZACIÓN AUTOMÁTICA DEL FONDO DE LIQUIDEZ
 if ahora.weekday() == 0 and random.choice([True, False]):
+# Lunes: Disminuye de 15% a 35% por retiros
 porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
 monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
 fondo_actual = max(100000.0, fondo_actual - monto_restar)
 else:
+# Resto de ciclos (cada 12h): Aumenta de 0.5% a 4.6%
 porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
 monto_sumar = fondo_actual * (porcentaje_subida / 100.0)
 fondo_actual += monto_sumar
@@ -193,76 +141,46 @@ cursor.execute("UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacio
 conn.commit()
 conn.close()
 
-datos_tx = None
-try:
-usar_tron = random.choice([True, False])
-if usar_tron:
-datos_tx = await obtener_ultima_transaccion_tron()
-if not datos_tx:
- datos_tx = await obtener_ultima_transaccion_ton()
-else:
-datos_tx = await obtener_ultima_transaccion_ton()
-if not datos_tx:
- datos_tx = await obtener_ultima_transaccion_tron()
-except Exception as blockchain_err:
-print(f"Aviso en consulta blockchain: {blockchain_err}")
+# 2. MENSAJES AUTOMÁTICOS AL CANAL
+moneda = random.choice(MONEDAS_COMPROBACION)
+monto = round(random.uniform(2.0, 1000.0), 2)
+if moneda["nombre"] == "GRAM":
+monto = int(monto)
 
-if datos_tx:
-tx_hash = datos_tx["hash"]
-monto = datos_tx["monto"]
-moneda_nombre = datos_tx["moneda"]
-red_oficial = datos_tx["red"]
-explorer_url = datos_tx["explorer"]
-else:
-es_red_ton = random.choice([True, False])
-if es_red_ton:
-tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
-monto = round(random.uniform(15.0, 800.0), 2)
-moneda_nombre = random.choice(["GRAM", "USDT"])
-red_oficial = "TON"
-explorer_url = "https://tonviewer.com/transaction/"
-else:
-tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
-monto = round(random.uniform(20.0, 1200.0), 2)
-moneda_nombre = "USDT"
-red_oficial = "TRON (TRC20)"
-explorer_url = "https://tronscan.org/#/transaction/"
-
+tx_hash = generar_hash_ficticio()
 usuario = generar_usuario_ficticio()
 
 if ahora.weekday() == 0 and random.choice([True, False]):
 mensaje = (
 f"✅ RETIRO PROCESADO (LUNES) \n\n"
 f"👤 Usuario:{usuario}\n"
-f"💰 Monto Retirado:{monto} {moneda_nombre}\n"
-f"🌐 Red: {red_oficial}\n"
+f"💰 Monto Retirado:{monto} {moneda['nombre']}\n"
+f"🌐 Red: {moneda['red']}\n"
 f"🔗 TXID:Ver en blockchain"
 )
 else:
 mensaje = (
 f"💎 NUEVO DEPÓSITO / INVERSIÓN\n\n"
 f"👤 Inversor:{usuario}\n"
-f"📥 Monto Invertido:{monto} {moneda_nombre}\n"
-f"🌐 Red Oficial: {red_oficial}\n"
+f"📥 Monto Invertido:{monto} {moneda['nombre']}\n"
+f"🌐 Red Oficial: {moneda['red']}\n"
 f"⚡ Estado: Acreditado y Activo\n"
 f"🔗 TXID:Verificar en Blockchain"
 )
 
 if CHANNEL_ID:
-try:
 await application.bot.send_message(
 chat_id=CHANNEL_ID,
 text=mensaje,
 parse_mode="Markdown",
 disable_web_page_preview=True
 )
-except Exception as e:
-print(f"Error enviando mensaje al canal: {e}")
 
+# Espera exacta de 12 horas (43200 segundos) para la siguiente actualización del fondo
+await asyncio.sleep(43200)
 except Exception as e:
-print(f"Error general en bucle de comprobaciones: {e}")
-
-await asyncio.sleep(random.randint(45, 90))
+print(f"Error en bucle de comprobaciones: {e}")
+await asyncio.sleep(60)
 
 async def post_init(application):
 application.create_task(bucle_comprobaciones(application))
@@ -355,14 +273,10 @@ conn.close()
 
 texto = "🌐 Welcome / Bienvenido\n\nPor favor, selecciona tu idioma / Please select your language:"
 
-try:
 if update.message:
 await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
 elif update.callback_query:
-await update.callback_query.answer()
 await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
-except Exception as e:
-print(f"Error en start: {e}")
 
 --- GENERADOR DEL MENSAJE DE REFERIDOS ---
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
@@ -371,34 +285,32 @@ link_referido = f"https://t.me/{username_bot}?start={user_id}"
 if idioma == "en":
 return (
 f"🌟 Welcome! We are glad you want to join\n\n"
-f"Thank you for your interest in joining our community. We want your experience to be completely transparent, secure, and automated.\n\n"
-f"Here is all the detailed information about our insertion plans:\n\n"
+f"Thank you for your interest in joining our community. Here is all the detailed information about our insertion plans and platform access.\n\n"
 f"🚀 Your Exclusive Referral Link:\n"
 f"{link_referido}\n\n"
 f"📊 Available Insertion Plans:\n"
-f"• Starter Plan (Basic - 0.7% every 7 days): Ideal for taking first steps and exploring the platform without major commitments. (Min: 3 USD)\n"
-f"• Growth Plan (Advanced - 1.2% every 7 days): Automation tools, promotional material, and priority support. (Min: 5 USD)\n"
-f"• Pro / Elite Plan (Custom - 2.6% every 7 days): Designed for team leaders and digital professionals. (Min: 10 USD)\n\n"
+f"1. Starter Plan (Basic): Ideal for first steps. Essential tools and standard community commissions.\n"
+f"2. Growth Plan (Advanced): Automation tools, exclusive promotional material, and priority support.\n"
+f"3. Pro / Elite Plan (Custom): For team leaders and digital professionals with customized benefits.\n\n"
 f"💡 Why join through this link?\n"
-f"✔ Security and backing of being properly linked to our network.\n"
-f"✔ Constant support with guides and orientation.\n"
-f"✔ Total transparency, no small print."
+f"• Guaranteed correct network placement.\n"
+f"• Dedicated guides and support.\n"
+f"• Full transparency from day one."
 )
 else:
 return (
 f"🌟 ¡Bienvenido/a! Nos alegra mucho que quieras sumarte\n\n"
-f"Gracias por tu interés en formar parte de nuestra comunidad. Queremos que tu experiencia sea totalmente transparente, segura y automatizada.\n\n"
-f"Aquí tienes toda la información detallada sobre nuestros planes de inserción:\n\n"
+f"Gracias por tu interés en formar parte de nuestra comunidad. Queremos que tu experiencia sea transparente y segura. Aquí tienes toda la información detallada sobre nuestros planes de inserción.\n\n"
 f"🚀 Tu Link de Referido Exclusivo:\n"
 f"{link_referido}\n\n"
 f"📊 Planes de Inserción Disponibles:\n"
-f"• Plan de Inicio (Básico - 0.7% cada 7 días): Ideal para dar los primeros pasos y explorar la plataforma sin grandes compromisos. (Mín: 3 USD)\n"
-f"• Plan Crecimiento (Avanzado - 1.2% cada 7 días): Herramientas de automatización, material promocional y soporte prioritario. (Mín: 5 USD)\n"
-f"• Plan Pro / Élite (Personalizado - 2.6% cada 7 días): Diseñado para líderes de equipos y profesionales del sector digital. (Mín: 10 USD)\n\n"
+f"1. Plan de Inicio (Básico): Ideal para dar los primeros pasos y explorar la plataforma sin grandes compromisos.\n"
+f"2. Plan Crecimiento (Avanzado): Herramientas de automatización, material promocional y soporte prioritario.\n"
+f"3. Plan Pro / Élite (Personalizado): Diseñado para líderes de equipos y profesionales del sector digital.\n\n"
 f"💡 ¿Por qué unirte a través de este enlace?\n"
-f"✔ Seguridad y respaldo de quedar vinculado/a correctamente a nuestra red.\n"
-f"✔ Acompañamiento constante con guías y orientación.\n"
-f"✔ Transparencia total, sin letras pequeñas."
+f"• Seguridad y respaldo de quedar vinculado/a correctamente a nuestra red.\n"
+f"• Acompañamiento con guías y orientación.\n"
+f"• Transparencia total sin letras pequeñas."
 )
 
 --- MANEJADOR DE CLICS (CALLBACKS) ---
@@ -408,10 +320,6 @@ await query.answer()
 
 data = query.data
 user = query.from_user
-
-if data == "btn_cambiar_idioma":
-await start(update, context)
-return
 
 if data.startswith("lang_"):
 nuevo_idioma = data.split("_")[1]
@@ -444,10 +352,7 @@ f"⚠️ Nota Importante: Por favor, no presiones los botones muy rápido. Dale 
 f"👇 Selecciona una opción del menú interactivo:"
 )
 
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
-except Exception as e:
-print(f"Error al editar idioma: {e}")
 return
 
 conn = sqlite3.connect("usuarios.db")
@@ -456,6 +361,10 @@ cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
 row = cursor.fetchone()
 conn.close()
 idioma = row[0] if row else 'es'
+
+if data == "btn_cambiar_idioma":
+await start(update, context)
+return
 
 if data == "btn_saldo":
 conn = sqlite3.connect("usuarios.db")
@@ -477,10 +386,7 @@ saldo_simulado += saldo_simulado * tasa_diaria
 
 texto = f"💰 Live Balance:\n• Initial Capital: {deposito} {moneda}\n• Estimated Current Balance: {saldo_simulado:.2f} {moneda}\n• Days Active: {dias_transcurridos}" if idioma == "en" else f"💰 Tu Balance y Rendimiento en Vivo:\n• Capital Inicial: {deposito} {moneda}\n• Balance Estimado Actual: {saldo_simulado:.2f} {moneda}\n• Días Activo: {dias_transcurridos}"
 
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_liquidez":
 conn = sqlite3.connect("usuarios.db")
@@ -497,16 +403,13 @@ f"• Current Liquidity Reserve:${fondo_actual:,.2f} USD\n" f"• **Status:** Ac
 f"• Estado: Activo y Respaldado en Redes Multired (TRON & TON)\n\n"
 f"💡 Respaldo operativo garantizado que asegura la estabilidad y procesamiento automatizado para todos los miembros."
 )
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_planes":
 if idioma == "en":
 texto = (
 "📋 Investment Plans & Yields:\n"
-"🔹 Daily Yield: Variable\n"
+"🔹 Daily Yield: 1.5% to 4.8% variable\n"
 "🔹 Limits: Min: 2 USD | Max: 1000 USD\n\n"
 )
 for key, plan in PLANES_INVERSION.items():
@@ -514,16 +417,13 @@ texto += f"🔹 ID {key}: {plan['nombre']}\n • Accepted: {plan['moneda']}\n �
 else:
 texto = (
 "📋 Planes de Inversión y Rendimientos:\n"
-"🔹 Rendimiento: 0.7%, 1.2% y 2.6% cada 7 días\n"
-"🔹 Límites: Mínimo: 3 USD | Máximo: 1000 USD\n\n"
+"🔹 Rendimiento Diario: Variable del 1.5% al 4.8%\n"
+"🔹 Límites: Mínimo: 2 USD | Máximo: 1000 USD\n\n"
 )
 for key, plan in PLANES_INVERSION.items():
 texto += f"🔹 ID {key}: {plan['nombre']}\n • Divisas: {plan['moneda']}\n • Redes: {plan['red']}\n • ℹ️ {plan['detalle']}\n\n"
 
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_depositar":
 if idioma == "en":
@@ -540,24 +440,15 @@ texto = (
 "🔹 Red TON (GRAM y USDT TON):\nUQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v\n\n"
 "⚠️ Tras transferir, reporta con: /notificar [Tu_Hash]"
 )
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_referidos":
 texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_retirar":
 texto = "🏦 Withdrawals: Processed every Monday automatically to your verified wallet." if idioma == "en" else "🏦 Sistema de Retiros: Los pagos se procesan todos los lunes de forma automatizada a tu billetera verificada."
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 elif data == "btn_soporte":
 conn = sqlite3.connect("usuarios.db")
@@ -566,10 +457,7 @@ cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,
 conn.commit()
 conn.close()
 texto = "🎧 Support Center. Type your message below:" if idioma == "en" else "🎧 Centro de Soporte. Escribe tu duda o problema a continuación:"
-try:
 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-except Exception:
-pass
 
 --- COMANDOS TRADICIONALES DE TEXTO ---
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -578,8 +466,8 @@ await start(update, context)
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 texto = (
 "📋 Planes de Inversión y Rendimientos:\n"
-"🔹 Rendimiento: 0.7%, 1.2% y 2.6% cada 7 días\n"
-"🔹 Límites: Mínimo: 3 USD | Máximo: 1000 USD\n\n"
+"🔹 Rendimiento Diario: 1.5% a 4.8%\n"
+"🔹 Límites: Mínimo: 2 USD | Máximo: 1000 USD\n\n"
 )
 for key, plan in PLANES_INVERSION.items():
 texto += f"🔹 ID {key}: {plan['nombre']}\n • Divisas: {plan['moneda']}\n • Redes: {plan['red']}\n • ℹ️ {plan['detalle']}\n\n"
@@ -694,12 +582,12 @@ except ValueError:
 await update.message.reply_text("❌ La cantidad debe ser numérica.")
 return
 
-if plan_id not in PLANES_INVERSION or not (3 <= cantidad <= 1000):
-await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (3 - 1000 USD).")
+if plan_id not in PLANES_INVERSION or not (2 <= cantidad <= 1000):
+await update.message.reply_text("❌ Plan inválido o cantidad fuera de rango (2 - 1000 USD).")
 return
 
 plan = PLANES_INVERSION[plan_id]
-wallet = WALLET_TRON if "Tron" in plan["red"] else WALLET_TON
+wallet = "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u" if "Tron" in plan["red"] else "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"
 
 await update.message.reply_text(
 f"✅ Inversión Registrada\n• Plan: {plan['nombre']}\n• Monto: {cantidad} {plan['moneda']}\n\n💳 Transfiere a:\n{wallet}\n\n📲 Reporta con: /notificar [Tu_Hash]",
@@ -758,26 +646,12 @@ cursor.execute("UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?", (user.id,
 conn.commit()
 conn.close()
 
-async def post_init(application):
-application.create_task(bucle_comprobaciones(application))
+def main():
+keep_alive()
 
---- ARRANQUE DUAL ESTABLE (RENDER + EVENT LOOP FIJO) ---
-if name == "main":
-# 1. Lanzar Flask en hilo secundario para Render / UptimeRobot
-t = Thread(target=run_web)
-t.daemon = True
-t.start()
-
-# 2. Configurar explícitamente el bucle de eventos para el hilo principal de Render
-try:
-loop = asyncio.get_event_loop()
-except RuntimeError:
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-# 3. Construir la app del bot de Telegram
 app_bot = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
+# Registro de Comandos y Handlers
 app_bot.add_handler(CommandHandler("start", start))
 app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
 app_bot.add_handler(CommandHandler("planes", mostrar_planes))
@@ -793,6 +667,8 @@ app_bot.add_handler(CommandHandler("responder", responder_admin))
 app_bot.add_handler(CallbackQueryHandler(boton_callback))
 app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-# 4. Arrancar polling asegurando que el loop maneje la ejecución correctamente
 app_bot.run_polling()
+
+if name == "main":
+main()
 
