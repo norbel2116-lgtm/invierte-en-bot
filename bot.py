@@ -86,10 +86,10 @@ PLANES_INVERSION = {
 }
 
 MONEDAS_COMPROBACION = [
-    {"nombre": "USDT", "red": "TRON (TRC20)", "min": 5, "max": 150, "explorer": "https://tronscan.org/#/transaction/"},
-    {"nombre": "USDT", "red": "TON", "min": 5, "max": 120, "explorer": "https://tonviewer.com/transaction/"},
-    {"nombre": "TRX", "red": "TRON", "min": 30, "max": 800, "explorer": "https://tronscan.org/#/transaction/"},
-    {"nombre": "GRAM", "red": "TON", "min": 500, "max": 15000, "explorer": "https://tonviewer.com/transaction/"}
+    {"nombre": "USDT", "red": "TRON (TRC20)", "explorer": "https://tronscan.org/#/transaction/"},
+    {"nombre": "USDT", "red": "TON", "explorer": "https://tonviewer.com/transaction/"},
+    {"nombre": "TRX", "red": "TRON", "explorer": "https://tronscan.org/#/transaction/"},
+    {"nombre": "GRAM", "red": "TON", "explorer": "https://tonviewer.com/transaction/"}
 ]
 
 def generar_hash_ficticio():
@@ -97,36 +97,48 @@ def generar_hash_ficticio():
     return "".join(random.choice(caracteres) for _ in range(64))
 
 def generar_usuario_ficticio():
-    nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro"]
+    nombres = ["Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia", "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen"]
     return f"{random.choice(nombres)}***{random.randint(10, 99)}"
 
-# --- TAREA EN SEGUNDO PLANO: COMPROBACIONES EN EL CANAL ---
+# --- TAREA EN SEGUNDO PLANO: FLUJO AUTOMÁTICO PARA EL CANAL ---
 async def bucle_comprobaciones(application):
-    await asyncio.sleep(10)
+    await asyncio.sleep(15)
     while True:
         try:
             ahora = datetime.now()
-            if ahora.weekday() == 0:  # Lunes: Retiros con ajuste variable del 20% al 30%
-                moneda = random.choice(MONEDAS_COMPROBACION)
-                monto = round(random.uniform(moneda["min"], moneda["max"]), 2)
-                if moneda["nombre"] == "GRAM":
-                    monto = int(monto)
-                
-                # Porcentaje de reducción aleatorio entre 20% y 30%
-                porcentaje_bajada = round(random.uniform(20.0, 30.0), 1)
-                
-                tx_hash = generar_hash_ficticio()
-                usuario = generar_usuario_ficticio()
+            moneda = random.choice(MONEDAS_COMPROBACION)
+            
+            # Monto variable entre 2 USD y 1000 USD
+            monto = round(random.uniform(2.0, 1000.0), 2)
+            if moneda["nombre"] == "GRAM":
+                monto = int(monto)
 
+            tx_hash = generar_hash_ficticio()
+            usuario = generar_usuario_ficticio()
+
+            # LUNES: Puede haber depósitos o retiros (estos últimos con reducción del 20% al 30%)
+            # RESTO DE DÍAS (Martes a Domingo): Exclusivamente depósitos e inversiones.
+            if ahora.weekday() == 0 and random.choice([True, False]):
+                porcentaje_bajada = round(random.uniform(20.0, 30.0), 1)
                 mensaje = (
                     f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
                     f"👤 **Usuario:** `{usuario}`\n"
                     f"💰 **Monto Retirado:** `{monto} {moneda['nombre']}`\n"
-                    f"📉 **Ajuste de Liquidez:** `-{porcentaje_bajada}%` (Caja semanal)\n"
+                    f"📉 **Ajuste de Liquidez:** `-{porcentaje_bajada}%`\n"
                     f"🌐 **Red:** {moneda['red']}\n"
-                    f"🔗 **TXID:** [Ver en explorador]({moneda['explorer']}{tx_hash})"
+                    f"🔗 **TXID (Verificable en Blockchain):** [Ver en explorador]({moneda['explorer']}{tx_hash})"
+                )
+            else:
+                mensaje = (
+                    f"💎 **NUEVO DEPÓSITO / INVERSIÓN**\n\n"
+                    f"👤 **Inversor:** `{usuario}`\n"
+                    f"📥 **Monto Invertido:** `{monto} {moneda['nombre']}`\n"
+                    f"🌐 **Red Oficial:** {moneda['red']}\n"
+                    f"⚡ **Estado:** Acreditado y Activo\n"
+                    f"🔗 **TXID (Verificable en Blockchain):** [Verificar en Blockchain]({moneda['explorer']}{tx_hash})"
                 )
 
+            if CHANNEL_ID:
                 await application.bot.send_message(
                     chat_id=CHANNEL_ID,
                     text=mensaje,
@@ -134,6 +146,7 @@ async def bucle_comprobaciones(application):
                     disable_web_page_preview=True
                 )
             
+            # Frecuencia aleatoria entre 30 min (1800s) y 2 horas (7200s)
             espera = random.randint(1800, 7200)  
             await asyncio.sleep(espera)
         except Exception as e:
@@ -290,8 +303,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🛡️ **Welcome to Invest Bot (Secure Multi-network)**\n\n"
                 f"Hello, **{user.first_name}**. You are in a transparent platform to manage crypto investments safely.\n\n"
                 f"✅ **Why trust us?**\n"
-                f"• Payouts processed **strictly on Mondays** (-20% to -30% weekly adjustment).\n"
-                f"• Real-time public proof channel.\n"
+                f"• Weekly payouts processed on Mondays (with withdrawals and deposits).\n"
+                f"• Real-time blockchain verifiable proofs (24/7 activity).\n"
                 f"• Automated multi-level system.\n\n"
                 f"⚠️ **Important Note:** Please **do not spam buttons**. Give the bot a few seconds to respond.\n\n"
                 f"👇 **Choose an option below:**"
@@ -301,8 +314,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🛡️ **Bienvenido a Invierte Bot (Multired Segura)**\n\n"
                 f"Hola, **{user.first_name}**. Estás en una plataforma transparente y automatizada para gestionar tus inversiones con seguridad.\n\n"
                 f"✅ **¿Por qué confiar en nosotros?**\n"
-                f"• Pagos procesados **estrictamente los lunes** (ajuste de retiros del 20% al 30%).\n"
-                f"• Canal público de comprobantes en tiempo real.\n"
+                f"• Pagos y retiros procesados los lunes, con depósitos constantes toda la semana.\n"
+                f"• Comprobantes verificables en la blockchain en tiempo real.\n"
                 f"• Sistema multinivel automatizado.\n\n"
                 f"⚠️ **Nota Importante:** Por favor, **no presiones los botones muy rápido**. Dale unos segundos al bot para responder.\n\n"
                 f"👇 **Selecciona una opción del menú interactivo:**"
@@ -335,7 +348,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deposito, moneda, fecha_str, ganancia_ref = row
             dias_transcurridos = (datetime.now() - datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")).days if fecha_str else 0
             
-            # Simulación con rendimiento diario variable (1.5% - 4.8%)
             saldo_simulado = deposito
             for _ in range(dias_transcurridos):
                 tasa_diaria = random.uniform(0.015, 0.048)
@@ -349,8 +361,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if idioma == "en":
             texto = (
                 "📋 **Investment Plans & Yields:**\n"
-                "🔹 **Daily Variable Yield:** 1.5% to 4.8% (Tue-Sun)\n"
-                "🔹 **Monday Payout/Withdrawal:** -20% to -30% liquidity adjustment\n"
+                "🔹 **Daily Deposits & Yield:** 1.5% to 4.8% variable\n"
+                "🔹 **Monday Payouts:** Withdrawals & liquidity adjustment (-20% to -30%)\n"
                 "🔹 **Limits:** Min: 2 USD | Max: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
@@ -358,8 +370,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             texto = (
                 "📋 **Planes de Inversión y Rendimientos:**\n"
-                "🔹 **Rendimiento Diario Variable:** 1.5% al 4.8% (Mar-Dom)\n"
-                "🔹 **Retiro Semanal (Lunes):** Ajuste del -20% al -30% por pagos\n"
+                "🔹 **Depósitos Diarios:** Rendimiento variable del 1.5% al 4.8%\n"
+                "🔹 **Lunes (Retiros y Pagos):** Ajuste del -20% al -30% con depósitos mixtos\n"
                 "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
             )
             for key, plan in PLANES_INVERSION.items():
@@ -408,8 +420,8 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "📋 **Planes de Inversión y Rendimientos:**\n"
-        "🔹 **Rendimiento Diario:** 1.5% a 4.8% (Martes a Domingo)\n"
-        "🔹 **Retiros de Lunes:** Ajuste del -20% al -30%\n"
+        "🔹 **Depósitos Diarios:** 1.5% a 4.8%\n"
+        "🔹 **Lunes:** Retiros y pagos (-20% a -30%) con flujo mixto\n"
         "🔹 **Límites:** Mínimo: 2 USD | Máximo: 1000 USD\n\n"
     )
     for key, plan in PLANES_INVERSION.items():
@@ -600,7 +612,7 @@ def main():
     app_bot.add_handler(CommandHandler("planes", mostrar_planes))
     app_bot.add_handler(CommandHandler("depositar", depositar))
     app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
-    app_bot.add_handler(CommandHandlers := CommandHandler("aprobar", aprobar_deposito))
+    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
     app_bot.add_handler(CommandHandler("referidos", referidos))
     app_bot.add_handler(CommandHandler("retirar", retirar))
     app_bot.add_handler(CommandHandler("invertir", invertir))
