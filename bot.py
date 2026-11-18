@@ -167,97 +167,106 @@ async def obtener_ultima_transaccion_ton():
         print(f"Error consultando Toncenter: {e}")
     return None
 
-# --- TAREA REPETITIVA PARA EL CANAL (JOBQUEUE ESTABLE) ---
-async def tarea_comprobaciones_canal(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        ahora = datetime.now()
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-        row_fondo = cursor.fetchone()
-        fondo_actual = row_fondo[0] if row_fondo else 124500.00
-
-        if ahora.weekday() == 0 and random.choice([True, False]):
-            porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
-            monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
-            fondo_actual = max(100000.0, fondo_actual - monto_restar)
-        else:
-            porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
-            monto_sumar = fondo_actual * (porcentaje_subida / 100.0)
-            fondo_actual += monto_sumar
-
-        cursor.execute("UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacion = ? WHERE id = 1", 
-                       (fondo_actual, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
-        conn.close()
-
-        datos_tx = None
+# --- TAREA EN SEGUNDO PLANO SEGURA (BUCLE ASÍNCRONO INDEPENDIENTE) ---
+async def tarea_comprobaciones_canal(bot):
+    await asyncio.sleep(15)
+    while True:
         try:
-            usar_tron = random.choice([True, False])
-            if usar_tron:
-                datos_tx = await obtener_ultima_transaccion_tron()
-                if not datos_tx:  
-                    datos_tx = await obtener_ultima_transaccion_ton()
-            else:
-                datos_tx = await obtener_ultima_transaccion_ton()
-                if not datos_tx:  
-                    datos_tx = await obtener_ultima_transaccion_tron()
-        except Exception as blockchain_err:
-            print(f"Aviso en consulta blockchain: {blockchain_err}")
+            ahora = datetime.now()
+            conn = sqlite3.connect("usuarios.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+            row_fondo = cursor.fetchone()
+            fondo_actual = row_fondo[0] if row_fondo else 124500.00
 
-        if datos_tx:
-            tx_hash = datos_tx["hash"]
-            monto = datos_tx["monto"]
-            moneda_nombre = datos_tx["moneda"]
-            red_oficial = datos_tx["red"]
-            explorer_url = datos_tx["explorer"]
-        else:
-            es_red_ton = random.choice([True, False])
             if ahora.weekday() == 0 and random.choice([True, False]):
-                monto = round(random.uniform(3.50, 1600.0), 2)
+                porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
+                monto_restar = fondo_actual * (porcentaje_bajada / 100.0)
+                fondo_actual = max(100000.0, fondo_actual - monto_restar)
             else:
-                monto = round(random.uniform(3.00, 1000.0), 2)
+                porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
+                monto_sumar = fondo_actual * (porcentaje_subida / 100.0)
+                fondo_actual += monto_sumar
 
-            if es_red_ton:
-                tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
-                moneda_nombre = random.choice(["GRAM", "USDT"])
-                red_oficial = "TON"
-                explorer_url = "https://tonviewer.com/transaction/"
+            cursor.execute("UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacion = ? WHERE id = 1", 
+                           (fondo_actual, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+            conn.close()
+
+            datos_tx = None
+            try:
+                usar_tron = random.choice([True, False])
+                if usar_tron:
+                    datos_tx = await obtener_ultima_transaccion_tron()
+                    if not datos_tx:  
+                        datos_tx = await obtener_ultima_transaccion_ton()
+                else:
+                    datos_tx = await obtener_ultima_transaccion_ton()
+                    if not datos_tx:  
+                        datos_tx = await obtener_ultima_transaccion_tron()
+            except Exception as blockchain_err:
+                print(f"Aviso en consulta blockchain: {blockchain_err}")
+
+            if datos_tx:
+                tx_hash = datos_tx["hash"]
+                monto = datos_tx["monto"]
+                moneda_nombre = datos_tx["moneda"]
+                red_oficial = datos_tx["red"]
+                explorer_url = datos_tx["explorer"]
             else:
-                tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
-                moneda_nombre = "USDT"
-                red_oficial = "TRON (TRC20)"
-                explorer_url = "https://tronscan.org/#/transaction/"
+                es_red_ton = random.choice([True, False])
+                if ahora.weekday() == 0 and random.choice([True, False]):
+                    monto = round(random.uniform(3.50, 1600.0), 2)
+                else:
+                    monto = round(random.uniform(3.00, 1000.0), 2)
 
-        usuario = generar_usuario_ficticio()
+                if es_red_ton:
+                    tx_hash = "f17d831d1b918717d23cf3053805908cfb677a552e464731f8211b514b7789ab"
+                    moneda_nombre = random.choice(["GRAM", "USDT"])
+                    red_oficial = "TON"
+                    explorer_url = "https://tonviewer.com/transaction/"
+                else:
+                    tx_hash = "573f831d1b918717d23cf3053805908cfb677a552e464731f8211b514b779182"
+                    moneda_nombre = "USDT"
+                    red_oficial = "TRON (TRC20)"
+                    explorer_url = "https://tronscan.org/#/transaction/"
 
-        if ahora.weekday() == 0 and random.choice([True, False]):
-            mensaje = (
-                f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
-                f"👤 **Usuario:** `{usuario}`\n"
-                f"💰 **Monto Retirado:** `{monto} {moneda_nombre}`\n"
-                f"🌐 **Red:** {red_oficial}\n"
-                f"🔗 **TXID:** [Ver en blockchain]({explorer_url}{tx_hash})"
-            )
-        else:
-            mensaje = (
-                f"💎 **NUEVO DEPÓSITO / INVERSIÓN**\n\n"
-                f"👤 **Inversor:** `{usuario}`\n"
-                f"📥 **Monto Invertido:** `{monto} {moneda_nombre}`\n"
-                f"🌐 **Red Oficial:** {red_oficial}\n"
-                f"⚡ **Estado:** Acreditado y Activo\n"
-                f"🔗 **TXID:** [Verificar en Blockchain]({explorer_url}{tx_hash})"
-            )
+            usuario = generar_usuario_ficticio()
 
-        if CHANNEL_ID:
-            await context.bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=mensaje,
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
-    except Exception as e:
-        print(f"Error general en tarea del canal: {e}")
+            if ahora.weekday() == 0 and random.choice([True, False]):
+                mensaje = (
+                    f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
+                    f"👤 **Usuario:** `{usuario}`\n"
+                    f"💰 **Monto Retirado:** `{monto} {moneda_nombre}`\n"
+                    f"🌐 **Red:** {red_oficial}\n"
+                    f"🔗 **TXID:** [Ver en blockchain]({explorer_url}{tx_hash})"
+                )
+            else:
+                mensaje = (
+                    f"💎 **NUEVO DEPÓSITO / INVERSIÓN**\n\n"
+                    f"👤 **Inversor:** `{usuario}`\n"
+                    f"📥 **Monto Invertido:** `{monto} {moneda_nombre}`\n"
+                    f"🌐 **Red Oficial:** {red_oficial}\n"
+                    f"⚡ **Estado:** Acreditado y Activo\n"
+                    f"🔗 **TXID:** [Verificar en Blockchain]({explorer_url}{tx_hash})"
+                )
+
+            if CHANNEL_ID:
+                try:
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=mensaje,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True
+                    )
+                except Exception as e:
+                    print(f"Error enviando mensaje al canal: {e}")
+            
+        except Exception as e:
+            print(f"Error general en bucle de comprobaciones: {e}")
+
+        intervalos_posibles = [30, 60, 90, 120, 180]
+        await asyncio.sleep(random.choice(intervalos_posibles))
 
 # --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
@@ -754,21 +763,17 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
         conn.commit()
         conn.close()
 
-# --- ARRANQUE PRINCIPAL CON JOBQUEUE NATIVO (ESTABLE Y SIN BLOQUEOS) ---
+# --- ARRANQUE PRINCIPAL CON TAREA EN SEGUNDO PLANO SEGURA ---
 async def main():
     # 1. Lanzamos Flask en segundo plano
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    # 2. Inicializamos la aplicación de Telegram (sin post_init conflictivo)
+    # 2. Inicializamos la aplicación de Telegram
     app_bot = ApplicationBuilder().token(TOKEN).build()
 
-    # 3. Configuramos la tarea repetitiva nativa para enviar comprobantes al canal cada 60 segundos
-    job_queue = app_bot.job_queue
-    job_queue.run_repeating(tarea_comprobaciones_canal, interval=60, first=10)
-
-    # 4. Registro de comandos y manejadores
+    # 3. Registro de comandos y manejadores
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
     app_bot.add_handler(CommandHandler("planes", mostrar_planes))
@@ -784,10 +789,13 @@ async def main():
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    # 5. Arrancamos de forma nativa con el event loop principal
+    # 4. Arrancamos de forma nativa con el event loop principal
     await app_bot.initialize()
     await app_bot.start()
     await app_bot.updater.start_polling()
+
+    # 5. Lanzamos el bucle del canal de forma segura usando el bot activo
+    asyncio.create_task(tarea_comprobaciones_canal(app_bot.bot))
     
     # Mantiene el bot corriendo indefinidamente
     stop_event = asyncio.Event()
