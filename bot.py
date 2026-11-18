@@ -107,7 +107,7 @@ def generar_usuario_ficticio():
 
 # --- CONSULTAS REALES A LA BLOCKCHAIN (APIS PÚBLICAS) ---
 async def obtener_ultima_transaccion_tron():
-    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=1&address={WALLET_TRON}"
+    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=5&address={WALLET_TRON}"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=10) as response:
@@ -115,7 +115,7 @@ async def obtener_ultima_transaccion_tron():
                     data = await response.json()
                     transacciones = data.get("data", [])
                     if transacciones:
-                        tx = transacciones[0]
+                        tx = random.choice(transacciones[:3]) if len(transacciones) >= 3 else transacciones[0]
                         hash_tx = tx.get("hash")
                         monto = 0
                         moneda = "USDT"
@@ -143,30 +143,37 @@ async def obtener_ultima_transaccion_tron():
     return None
 
 async def obtener_ultima_transaccion_ton():
-    url = f"https://toncenter.com/api/v2/getTransactions?address={WALLET_TON}&limit=1"
+    url = f"https://tonapi.io/v2/blockchain/accounts/{WALLET_TON}/transactions?limit=5"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if data.get("ok") and data.get("result"):
-                        tx = data["result"][0]
-                        tx_hash_data = tx.get("transaction_id", {})
-                        hash_tx = tx_hash_data.get("hash", "")
-                        monto = round(random.uniform(10.0, 450.0), 2)
+                    transacciones = data.get("transactions", [])
+                    if transacciones:
+                        tx = random.choice(transacciones[:3]) if len(transacciones) >= 3 else transacciones[0]
+                        hash_tx = tx.get("hash")
                         
+                        monto = 0
+                        in_msg = tx.get("in_msg", {})
+                        value_nanotons = float(in_msg.get("value", 0))
+                        if value_nanotons > 0:
+                            monto = round(value_nanotons / 1_000_000_000, 2)
+                        
+                        if monto < 0.5:
+                            monto = round(random.uniform(5.0, 250.0), 2)
+
                         if hash_tx:
                             return {
                                 "hash": hash_tx,
                                 "monto": monto,
-                                "moneda": random.choice(["GRAM", "USDT"]),
-                                "red": "TON (Jetton/TON)",
+                                "moneda": random.choice(["GRAM", "USDT", "TON"]),
+                                "red": "TON",
                                 "explorer": f"https://tonviewer.com/transaction/{hash_tx}"
                             }
     except Exception as e:
-        print(f"Error consultando Toncenter: {e}")
+        print(f"Error consultando TonAPI: {e}")
     return None
-
 # --- TAREA EN SEGUNDO PLANO SEGURA (BUCLE ASÍNCRONO INDEPENDIENTE) ---
 async def tarea_comprobaciones_canal(bot):
     await asyncio.sleep(15)
