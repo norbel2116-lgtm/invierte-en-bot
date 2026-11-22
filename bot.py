@@ -89,7 +89,7 @@ PLANES_INVERSION = {
         "nombre": "Plan de Inicio (7 días)",
         "modalidad": "plazo_fijo",
         "dias": 7,
-        "tasa_ciclo": 0.007,  # 0.7% por ciclo de 7 días
+        "tasa_ciclo": 0.007,
         "min": 3.0,
         "max": 1000.0,
         "moneda": "USDT",
@@ -101,7 +101,7 @@ PLANES_INVERSION = {
         "nombre": "Plan Crecimiento (14 días)",
         "modalidad": "plazo_fijo",
         "dias": 14,
-        "tasa_ciclo": 0.024,  # 1.2% cada 7 días (~2.4% en 14 días)
+        "tasa_ciclo": 0.024,
         "min": 5.0,
         "max": 1000.0,
         "moneda": "USDT",
@@ -113,7 +113,7 @@ PLANES_INVERSION = {
         "nombre": "Plan Pro / Élite (21 días)",
         "modalidad": "plazo_fijo",
         "dias": 21,
-        "tasa_ciclo": 0.078,  # 2.6% cada 7 días (~7.8% en 21 días)
+        "tasa_ciclo": 0.078,
         "min": 10.0,
         "max": 1000.0,
         "moneda": "USDT",
@@ -125,7 +125,7 @@ PLANES_INVERSION = {
         "nombre": "Fondo Flexible / Liquidez",
         "modalidad": "liquidez_flexible",
         "dias": 0,
-        "tasa_ciclo": 0.005,  # 0.5% cada 7 días activos
+        "tasa_ciclo": 0.005,
         "min": 3.0,
         "max": 1000.0,
         "moneda": "USDT",
@@ -137,13 +137,315 @@ PLANES_INVERSION = {
         "nombre": "Meta / Aporte Escalonado",
         "modalidad": "aporte_meta",
         "dias": 30,
-        "tasa_ciclo": 0.032,  # 0.8% semanal (4 semanas = 3.2%)
+        "tasa_ciclo": 0.032,
         "min": 2.0,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "ETH",
         "permite_reinvest": True,
-        "detalle": "30 días | 0.8% semanal (3.2% en 4 semanas). Suma aportes progresivos.",}
+        "detalle": "30 días | 0.8% semanal (3.2% en 4 semanas). Suma aportes progresivos.",
+    },
+}
+
+
+# --- BASE DE DATOS SQLITE ---
+def inicializar_db():
+    try:
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                user_id INTEGER PRIMARY KEY,
+                nombre TEXT,
+                patrocinador_id INTEGER,
+                deposito_activo REAL DEFAULT 0,
+                moneda_deposito TEXT DEFAULT 'USDT',
+                red_deposito TEXT DEFAULT 'TRON',
+                fecha_deposito TEXT,
+                ganancias_referidos REAL DEFAULT 0,
+                en_soporte INTEGER DEFAULT 0,
+                idioma TEXT DEFAULT 'es'
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS liquidez_global (
+                id INTEGER PRIMARY KEY,
+                fondo_actual REAL,
+                ultima_actualizacion TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS inversiones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                plan_id TEXT,
+                modalidad TEXT,
+                monto REAL,
+                moneda TEXT,
+                red TEXT,
+                reinversion_auto INTEGER DEFAULT 0,
+                dias_plazo INTEGER DEFAULT 0,
+                fecha_inicio TEXT,
+                estado TEXT DEFAULT 'activa'
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS comprobantes_verificados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_hash TEXT UNIQUE,
+                red TEXT,
+                moneda TEXT,
+                monto REAL,
+                tipo TEXT,
+                fecha TEXT
+            )
+        """)
+
+        cursor.execute("PRAGMA table_info(usuarios)")
+        columnas = [col[1] for col in cursor.fetchall()]
+        if "red_deposito" not in columnas:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN red_deposito TEXT DEFAULT 'TRON'")
+
+        cursor.execute("SELECT COUNT(*) FROM liquidez_global")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                "INSERT INTO liquidez_global (id, fondo_actual, ultima_actualizacion) VALUES (1, ?, ?)",
+                (124500.00, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error inicializando BD: {e}")
+
+
+inicializar_db()
+def generar_usuario_ficticio():
+    nombres = [
+        "Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia",
+        "Miguel", "Rosa", "David", "Alejandro", "Daniel", "Carmen",
+    ]
+    return f"{random.choice(nombres)}***{random.randint(10, 99)}"
+
+
+def es_hash_valido(tx_hash: str, red: str) -> bool:
+    if not tx_hash or not isinstance(tx_hash, str):
+        return False
+    h = tx_hash.strip()
+    if red in ("TRON", "BSC", "ETH", "BTC"):
+        return bool(re.fullmatch(r"[0-9a-fA-F]{64}", h))
+    if red == "TON":
+        return bool(re.fullmatch(r"[A-Za-z0-9+/=_-]{32,128}", h))
+    return False
+
+
+# --- CONSULTA REAL A BLOCKCHAIN ---
+async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str):
+    url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=10"
+    async with session.get(url, timeout=12) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+        for tx in data.get("data") or []:
+            tx_hash = tx.get("transaction_id")
+            if not es_hash_valido(tx_hash, "TRON"):
+                continue
+            decimals = int((tx.get("token_info") or {}).get("decimals", 6))
+            raw_val = tx.get("value")
+            if raw_val is None:
+                continue
+            monto = round(float(raw_val) / (10 ** decimals), 2)
+            if monto <= 0:
+                continue
+            simbolo = (tx.get("token_info") or {}).get("symbol", "USDT")
+            return {
+                "hash": tx_hash,
+                "monto": monto,
+                "moneda": simbolo,
+                "red": "TRON (TRC20)",
+                "explorer": f"https://tronscan.org/#/transaction/{tx_hash}",
+            }
+    return None
+
+
+async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str):
+    url = f"https://mempool.space/api/address/{address}/txs"
+    async with session.get(url, timeout=12) as resp:
+        if resp.status != 200:
+            return None
+        txs = await resp.json()
+        if not isinstance(txs, list):
+            return None
+        for tx in txs[:10]:
+            txid = tx.get("txid")
+            if not es_hash_valido(txid, "BTC"):
+                continue
+            status = tx.get("status") or {}
+            if not status.get("confirmed"):
+                continue
+            monto_sats = sum(
+                int(vout.get("value", 0))
+                for vout in (tx.get("vout") or [])
+                if vout.get("scriptpubkey_address") == address
+            )
+            if monto_sats == 0 and tx.get("vout"):
+                monto_sats = sum(int(v.get("value", 0)) for v in tx.get("vout"))
+            monto_btc = round(monto_sats / 1e8, 6)
+            if monto_btc <= 0:
+                continue
+            return {
+                "hash": txid,
+                "monto": monto_btc,
+                "moneda": "BTC",
+                "red": "Bitcoin (BTC)",
+                "explorer": f"https://mempool.space/tx/{txid}",
+            }
+    return None
+
+
+async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str):
+    url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=10"
+    async with session.get(url, timeout=12) as resp:
+        if resp.status != 200:
+            return None
+        data = await resp.json()
+        if not data.get("ok"):
+            return None
+        for tx in data.get("result") or []:
+            tx_id_obj = tx.get("transaction_id") or {}
+            tx_hash = tx_id_obj.get("hash")
+            if not es_hash_valido(tx_hash, "TON"):
+                continue
+            in_msg = tx.get("in_msg") or {}
+            value_nano = int(in_msg.get("value") or 0)
+            monto_ton = round(value_nano / 1e9, 4)
+            if monto_ton <= 0:
+                continue
+            return {
+                "hash": tx_hash,
+                "monto": monto_ton,
+                "moneda": "TON",
+                "red": "TON",
+                "explorer": f"https://tonviewer.com/transaction/{tx_hash}",
+            }
+    return None
+
+
+async def obtener_comprobante_blockchain_real():
+    consultores = [
+        ("TRON", obtener_tx_real_tron, WALLETS_OFICIALES["TRON"]),
+        ("BTC", obtener_tx_real_btc, WALLETS_OFICIALES["BTC"]),
+        ("TON", obtener_tx_real_ton, WALLETS_OFICIALES["TON"]),
+    ]
+    random.shuffle(consultores)
+    async with aiohttp.ClientSession() as session:
+        for red, fn, addr in consultores:
+            if not addr or addr.startswith("TU_"):
+                continue
+            try:
+                resultado = await fn(session, addr)
+                if resultado:
+                    return resultado
+            except Exception as e:
+                print(f"Error consultando {red}: {e}")
+
+    try:
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT tx_hash, red, moneda, monto FROM comprobantes_verificados ORDER BY id DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            tx_hash, red_key, moneda, monto = row
+            base_url = REDES_INFO.get(red_key, REDES_INFO["TRON"])["explorer"]
+            return {
+                "hash": tx_hash,
+                "monto": monto,
+                "moneda": moneda,
+                "red": REDES_INFO.get(red_key, REDES_INFO["TRON"])["nombre"],
+                "explorer": f"{base_url}{tx_hash}",
+            }
+    except Exception:
+        pass
+    return None
+
+
+def calcular_retiro_anticipado(capital_base: float, moneda: str = "USDT"):
+    capital = max(0.0, float(capital_base))
+    moneda_upper = (moneda or "USDT").upper()
+    comision = COMISION_ANTICIPADA_POR_MONEDA.get(moneda_upper, 0.2) if capital > 0 else 0.0
+    decimales = 8 if moneda_upper == "BTC" else 4
+    neto = max(0.0, round(capital - comision, decimales))
+    return {
+        "capital_base": capital,
+        "comision_red": comision,
+        "neto_a_recibir": neto,
+        "moneda": moneda_upper,
+    }
+
+
+async def tarea_comprobaciones_canal(bot):
+    await asyncio.sleep(15)
+    while True:
+        try:
+            ahora = datetime.now()
+            conn = sqlite3.connect("usuarios.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+            row_fondo = cursor.fetchone()
+            fondo_actual = row_fondo[0] if row_fondo else 124500.00
+
+            if ahora.weekday() == 0 and random.choice([True, False]):
+                porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
+                fondo_actual = max(100000.0, fondo_actual - (fondo_actual * porcentaje_bajada / 100.0))
+            else:
+                porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
+                fondo_actual += fondo_actual * (porcentaje_subida / 100.0)
+
+            cursor.execute(
+                "UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacion = ? WHERE id = 1",
+                (fondo_actual, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+            conn.close()
+
+            datos_tx = await obtener_comprobante_blockchain_real()
+            if datos_tx and CHANNEL_ID:
+                usuario = generar_usuario_ficticio()
+                if ahora.weekday() == 0 and random.choice([True, False]):
+                    mensaje = (
+                        f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
+                        f"👤 **Usuario:** `{usuario}`\n"
+                        f"💰 **Monto:** `{datos_tx['monto']} {datos_tx['moneda']}`\n"
+                        f"🌐 **Red:** {datos_tx['red']}\n"
+                        f"🔗 **TXID:** [Ver en blockchain]({datos_tx['explorer']})"
+                    )
+                else:
+                    mensaje = (
+                        f"💎 **COMPROBANTE VERIFICADO EN BLOCKCHAIN**\n\n"
+                        f"👤 **Inversor:** `{usuario}`\n"
+                        f"📥 **Monto:** `{datos_tx['monto']} {datos_tx['moneda']}`\n"
+                        f"🌐 **Red Oficial:** {datos_tx['red']}\n"
+                        f"⚡ **Estado:** Verificado\n"
+                        f"🔗 **TXID:** [Verificar en Blockchain]({datos_tx['explorer']})"
+                    )
+                try:
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=mensaje,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True,
+                    )
+                except Exception as e:
+                    print(f"Error enviando mensaje al canal: {e}")
+
+        except Exception as e:
+            print(f"Error general en bucle de comprobaciones: {e}")
+
+        await asyncio.sleep(random.choice([60, 90, 120, 180]))
+
+
 # --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
@@ -261,8 +563,6 @@ def teclado_confirmar_retiro_anticipado(idioma="es"):
         ],
         [InlineKeyboardButton("⬅️ Menú Principal", callback_data="lang_es")],
     ])
-
-
 def texto_wallets_deposito(idioma="es"):
     if idioma == "en":
         encabezado = "💳 **Official Deposit Wallets (5 Networks)**:\n\n"
