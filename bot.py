@@ -143,7 +143,7 @@ PLANES_INVERSION = {
         "moneda": "USDT",
         "red_sugerida": "ETH",
         "permite_reinvest": True,
-        "detalle": "30 días | 0.8% semanal (3.2% en 4 semanas). Suma aportes progresivos.",
+        "detalle": "30 días | 0.8% semanal (3.2% en 4 semanas). Suma aportes progresivos.",}
 # --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
