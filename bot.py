@@ -1374,9 +1374,9 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute(
             "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
             (comision, patrocinador_id),
-        )
-        conn.commit()
-        try:
+        )            
+            conn.commit()
+            try:
                 await context.bot.send_message(
                     chat_id=patrocinador_id,
                     text=(
@@ -1385,5 +1385,5 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     parse_mode="Markdown",
                 )
-        except Exception as e:
+            except Exception as e:
                 print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
