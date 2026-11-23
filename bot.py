@@ -73,6 +73,32 @@ REDES_INFO = {
     },
 }
 
+# --- HASHES DE RESPALDO VERIFICABLES (SOLO TON Y TRON, 64 HEX) ---
+HASHES_RESPALDO_TON = [
+    "07e8122c8ae5bba139ee091298a8c1f39bc0691b9be987dd68c287f69de5c359",
+    "d789dfa8cadf9976259114a3609aa6e01378e3109883cee4a175ceee8c405a83",
+    "fbc9e75185b260d0fd172a84e8f4ec6e2f0f91d6e3d39d19577b59f0ec4d983d",
+    "e4f7f0c440d59af7b820f66f138c58e556989875bdb37cf015b6a16eb00252f0",
+    "545a5a864b65aa92445f2c1da0d3a7dc16c8e7d12d2e77b4326fb9a8d9b94126",
+    "58ba2676a11c9417b64afad9301d95339a0531872d2a626a56d2b0f66d5faeb7",
+    "c65aad57ab22b5f1cb7118939d505d235213163d247eb6ab5a522cb8d244bee8",
+    "1fc2464fca68b255cfd7a98cbbd172fa5316e4886195433d3945412edb40d51e",
+    "1470537fbb640fa949460b0f44fe16427d2d0420b1a808210fb14b229f8259d3",
+    "4af87bbb8b9a744f283c8e95b474fc8288820ecda25a956f660f71f546f99383",
+    "d657a8b3af7715f6753de77dfec4babef43a91a36557294b6a295f380e7d3fcc",
+    "55ba70950c0fe847049d0117b86714944b3a4498eb7c4439a7705020bc6169ab",
+    "1795e3de8ce187e536a7ec8a7602d2e3f60a0fa6c0d48281da42b4014156a0ac",
+    "96d5cc65f4b18aa405eb628948d3bbbf7f1e3b89eb75beb388fddaceef446453",
+]
+
+HASHES_RESPALDO_TRON = [
+    "94dc2877a6601436dc447a48e62a20f071ac8fc1bdd877e4a6d8489ce397f4c6",
+    "d654d283158a4706531e226ec690bbeaaefe24b51ac9c6b2ddd9236a39f387b1",
+]
+
+MIN_MONTO_INVERSION = 1.0
+HASHES_USADOS_SESION = set()
+
 COMISION_ANTICIPADA_POR_MONEDA = {
     "USDT": 0.2,
     "TRX": 0.2,
@@ -212,6 +238,19 @@ def inicializar_db():
                 "INSERT INTO liquidez_global (id, fondo_actual, ultima_actualizacion) VALUES (1, ?, ?)",
                 (124500.00, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
+
+        fecha_respaldo = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for h_ton in HASHES_RESPALDO_TON:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (h_ton, "TON", "TON", 10.0, "respaldo_ton", fecha_respaldo),
+            )
+        for h_tron in HASHES_RESPALDO_TRON:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (h_tron, "TRON", "USDT", 25.0, "respaldo_tron", fecha_respaldo),
+            )
+
         conn.commit()
         conn.close()
     except Exception as e:
@@ -219,6 +258,8 @@ def inicializar_db():
 
 
 inicializar_db()
+
+
 def generar_usuario_ficticio():
     nombres = [
         "Carlos", "Ana", "Luis", "Elena", "Javier", "Sofia",
@@ -232,16 +273,64 @@ def es_hash_valido(tx_hash: str, red: str) -> bool:
         return False
     h = tx_hash.strip()
     if red in ("TRON", "BSC", "ETH", "BTC"):
-        return bool(re.fullmatch(r"[0-9a-fA-F]{64}", h))
+        return bool(re.fullmatch(r"(0x)?[0-9a-fA-F]{64}", h))
     if red == "TON":
-        return bool(re.fullmatch(r"[A-Za-z0-9+/=_-]{32,128}", h))
+        return bool(re.fullmatch(r"[0-9a-fA-F]{64}|[A-Za-z0-9+/=_-]{32,128}", h))
     return False
 
 
-# --- CONSULTA REAL A BLOCKCHAIN ---
-async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str):
-    url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=10"
-    async with session.get(url, timeout=12) as resp:
+def _marcar_hash_usado(tx_hash: str):
+    HASHES_USADOS_SESION.add(tx_hash)
+    if len(HASHES_USADOS_SESION) > 500:
+        HASHES_USADOS_SESION.clear()
+        HASHES_USADOS_SESION.add(tx_hash)
+
+
+def _hash_ya_publicado(tx_hash: str) -> bool:
+    if tx_hash in HASHES_USADOS_SESION:
+        return True
+    try:
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM comprobantes_verificados WHERE tx_hash = ? AND tipo = 'publicado_canal' LIMIT 1",
+            (tx_hash,),
+        )
+        existe = cursor.fetchone() is not None
+        conn.close()
+        return existe
+    except Exception:
+        return False
+
+
+def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float):
+    _marcar_hash_usado(tx_hash)
+    try:
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+            (tx_hash, red, moneda, monto, "publicado_canal", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error guardando hash publicado: {e}")
+
+
+def _cumple_filtro_monto(monto: float, tipo_operacion: str) -> bool:
+    if monto is None or monto <= 0:
+        return False
+    if tipo_operacion == "deposito":
+        return monto >= MIN_MONTO_INVERSION
+    # Retiros: cualquier valor positivo (> 0)
+    return True
+
+
+# --- VERIFICACIÓN REAL EN BLOCKCHAIN (SIN 404) ---
+async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
+    url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=25"
+    async with session.get(url, timeout=10) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
@@ -253,29 +342,30 @@ async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str):
             raw_val = tx.get("value")
             if raw_val is None:
                 continue
-            monto = round(float(raw_val) / (10 ** decimals), 2)
-            if monto <= 0:
+            monto = round(float(raw_val) / (10 ** decimals), 4)
+            if not _cumple_filtro_monto(monto, tipo_operacion) or _hash_ya_publicado(tx_hash):
                 continue
             simbolo = (tx.get("token_info") or {}).get("symbol", "USDT")
             return {
                 "hash": tx_hash,
                 "monto": monto,
                 "moneda": simbolo,
-                "red": "TRON (TRC20)",
-                "explorer": f"https://tronscan.org/#/transaction/{tx_hash}",
+                "red": REDES_INFO["TRON"]["nombre"],
+                "explorer": f"{REDES_INFO['TRON']['explorer']}{tx_hash}",
+                "verificado": "Real en TronGrid",
             }
     return None
 
 
-async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str):
+async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
     url = f"https://mempool.space/api/address/{address}/txs"
-    async with session.get(url, timeout=12) as resp:
+    async with session.get(url, timeout=10) as resp:
         if resp.status != 200:
             return None
         txs = await resp.json()
         if not isinstance(txs, list):
             return None
-        for tx in txs[:10]:
+        for tx in txs[:20]:
             txid = tx.get("txid")
             if not es_hash_valido(txid, "BTC"):
                 continue
@@ -290,21 +380,22 @@ async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str):
             if monto_sats == 0 and tx.get("vout"):
                 monto_sats = sum(int(v.get("value", 0)) for v in tx.get("vout"))
             monto_btc = round(monto_sats / 1e8, 6)
-            if monto_btc <= 0:
+            if not _cumple_filtro_monto(monto_btc, tipo_operacion) or _hash_ya_publicado(txid):
                 continue
             return {
                 "hash": txid,
                 "monto": monto_btc,
                 "moneda": "BTC",
-                "red": "Bitcoin (BTC)",
-                "explorer": f"https://mempool.space/tx/{txid}",
+                "red": REDES_INFO["BTC"]["nombre"],
+                "explorer": f"{REDES_INFO['BTC']['explorer']}{txid}",
+                "verificado": "Real en Mempool",
             }
     return None
 
 
-async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str):
-    url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=10"
-    async with session.get(url, timeout=12) as resp:
+async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
+    url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=25"
+    async with session.get(url, timeout=10) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
@@ -318,134 +409,95 @@ async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str):
             in_msg = tx.get("in_msg") or {}
             value_nano = int(in_msg.get("value") or 0)
             monto_ton = round(value_nano / 1e9, 4)
-            if monto_ton <= 0:
+            if not _cumple_filtro_monto(monto_ton, tipo_operacion) or _hash_ya_publicado(tx_hash):
                 continue
             return {
                 "hash": tx_hash,
                 "monto": monto_ton,
                 "moneda": "TON",
-                "red": "TON",
-                "explorer": f"https://tonviewer.com/transaction/{tx_hash}",
+                "red": REDES_INFO["TON"]["nombre"],
+                "explorer": f"{REDES_INFO['TON']['explorer']}{tx_hash}",
+                "verificado": "Real en Toncenter",
             }
     return None
 
 
-async def obtener_comprobante_blockchain_real():
-    consultores = [
-        ("TRON", obtener_tx_real_tron, WALLETS_OFICIALES["TRON"]),
-        ("BTC", obtener_tx_real_btc, WALLETS_OFICIALES["BTC"]),
-        ("TON", obtener_tx_real_ton, WALLETS_OFICIALES["TON"]),
-    ]
-    random.shuffle(consultores)
-    async with aiohttp.ClientSession() as session:
-        for red, fn, addr in consultores:
-            if not addr or addr.startswith("TU_"):
-                continue
-            try:
-                resultado = await fn(session, addr)
-                if resultado:
-                    return resultado
-            except Exception as e:
-                print(f"Error consultando {red}: {e}")
-
-    try:
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT tx_hash, red, moneda, monto FROM comprobantes_verificados ORDER BY id DESC LIMIT 1"
-        )
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            tx_hash, red_key, moneda, monto = row
-            base_url = REDES_INFO.get(red_key, REDES_INFO["TRON"])["explorer"]
-            return {
-                "hash": tx_hash,
-                "monto": monto,
-                "moneda": moneda,
-                "red": REDES_INFO.get(red_key, REDES_INFO["TRON"])["nombre"],
-                "explorer": f"{base_url}{tx_hash}",
-            }
-    except Exception:
-        pass
-    return None
-
-
-def calcular_retiro_anticipado(capital_base: float, moneda: str = "USDT"):
-    capital = max(0.0, float(capital_base))
-    moneda_upper = (moneda or "USDT").upper()
-    comision = COMISION_ANTICIPADA_POR_MONEDA.get(moneda_upper, 0.2) if capital > 0 else 0.0
-    decimales = 8 if moneda_upper == "BTC" else 4
-    neto = max(0.0, round(capital - comision, decimales))
-    return {
-        "capital_base": capital,
-        "comision_red": comision,
-        "neto_a_recibir": neto,
-        "moneda": moneda_upper,
-    }
-
-
-async def tarea_comprobaciones_canal(bot):
-    await asyncio.sleep(15)
-    while True:
+async def _obtener_tx_evm_rpc(
+    session: aiohttp.ClientSession,
+    rpc_urls: list[str],
+    red_key: str,
+    simbolo: str,
+    tipo_operacion: str = "deposito",
+):
+    for rpc_url in rpc_urls:
         try:
-            ahora = datetime.now()
-            conn = sqlite3.connect("usuarios.db")
-            cursor = conn.cursor()
-            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-            row_fondo = cursor.fetchone()
-            fondo_actual = row_fondo[0] if row_fondo else 124500.00
+            payload_latest = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+            async with session.post(rpc_url, json=payload_latest, timeout=10) as resp:
+                if resp.status != 200:
+                    continue
+                data_latest = await resp.json()
+                hex_block = data_latest.get("result")
+                if not hex_block:
+                    continue
+                block_num = int(hex_block, 16)
 
-            if ahora.weekday() == 0 and random.choice([True, False]):
-                porcentaje_bajada = round(random.uniform(15.0, 35.0), 2)
-                fondo_actual = max(100000.0, fondo_actual - (fondo_actual * porcentaje_bajada / 100.0))
-            else:
-                porcentaje_subida = round(random.uniform(0.5, 4.6), 2)
-                fondo_actual += fondo_actual * (porcentaje_subida / 100.0)
-
-            cursor.execute(
-                "UPDATE liquidez_global SET fondo_actual = ?, ultima_actualizacion = ? WHERE id = 1",
-                (fondo_actual, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            )
-            conn.commit()
-            conn.close()
-
-            datos_tx = await obtener_comprobante_blockchain_real()
-            if datos_tx and CHANNEL_ID:
-                usuario = generar_usuario_ficticio()
-                if ahora.weekday() == 0 and random.choice([True, False]):
-                    mensaje = (
-                        f"✅ **RETIRO PROCESADO (LUNES)**\n\n"
-                        f"👤 **Usuario:** `{usuario}`\n"
-                        f"💰 **Monto:** `{datos_tx['monto']} {datos_tx['moneda']}`\n"
-                        f"🌐 **Red:** {datos_tx['red']}\n"
-                        f"🔗 **TXID:** [Ver en blockchain]({datos_tx['explorer']})"
-                    )
-                else:
-                    mensaje = (
-                        f"💎 **COMPROBANTE VERIFICADO EN BLOCKCHAIN**\n\n"
-                        f"👤 **Inversor:** `{usuario}`\n"
-                        f"📥 **Monto:** `{datos_tx['monto']} {datos_tx['moneda']}`\n"
-                        f"🌐 **Red Oficial:** {datos_tx['red']}\n"
-                        f"⚡ **Estado:** Verificado\n"
-                        f"🔗 **TXID:** [Verificar en Blockchain]({datos_tx['explorer']})"
-                    )
-                try:
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=mensaje,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True,
-                    )
-                except Exception as e:
-                    print(f"Error enviando mensaje al canal: {e}")
-
+            for offset in range(0, 3):
+                target_hex = hex(block_num - offset)
+                payload_block = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_getBlockByNumber",
+                    "params": [target_hex, True],
+                    "id": 2,
+                }
+                async with session.post(rpc_url, json=payload_block, timeout=10) as resp_blk:
+                    if resp_blk.status != 200:
+                        continue
+                    blk_json = await resp_blk.json()
+                    txs = (blk_json.get("result") or {}).get("transactions") or []
+                    random.shuffle(txs)
+                    for tx in txs[:40]:
+                        tx_hash = tx.get("hash")
+                        if not es_hash_valido(tx_hash, red_key):
+                            continue
+                        val_wei = int(tx.get("value") or "0x0", 16)
+                        monto = round(val_wei / 1e18, 6)
+                        # Solo transacciones con valor real > 0 en cadena para no inventar montos
+                        if not _cumple_filtro_monto(monto, tipo_operacion) or _hash_ya_publicado(tx_hash):
+                            continue
+                        return {
+                            "hash": tx_hash,
+                            "monto": monto,
+                            "moneda": simbolo,
+                            "red": REDES_INFO[red_key]["nombre"],
+                            "explorer": f"{REDES_INFO[red_key]['explorer']}{tx_hash}",
+                            "verificado": f"Real en bloque ({red_key})",
+                        }
         except Exception as e:
-            print(f"Error general en bucle de comprobaciones: {e}")
+            print(f"Error RPC {red_key} ({rpc_url}): {e}")
+    return None
 
-        await asyncio.sleep(random.choice([60, 90, 120, 180]))
+
+async def obtener_tx_real_bsc(session: aiohttp.ClientSession, _address: str, tipo_operacion: str = "deposito"):
+    rpcs_bsc = [
+        "https://bsc-dataseed.binance.org/",
+        "https://bsc-dataseed1.defibit.io/",
+        "https://bsc-rpc.publicnode.com",
+    ]
+    return await _obtener_tx_evm_rpc(session, rpcs_bsc, "BSC", "BNB", tipo_operacion)
 
 
+async def obtener_tx_real_eth(session: aiohttp.ClientSession, _address: str, tipo_operacion: str = "deposito"):
+    rpcs_eth = [
+        "https://ethereum-rpc.publicnode.com",
+        "https://cloudflare-eth.com",
+    ]
+    return await _obtener_tx_evm_rpc(session, rpcs_eth, "ETH", "ETH", tipo_operacion)
+
+
+def obtener_comprobante_respaldo_local(tipo_operacion: str = "deposito"):
+    min_monto = MIN_MONTO_INVERSION if tipo_operacion == "deposito" else 0.05
+    candidatos_ton = [h for h in HASHES_RESPALDO_TON if h not in HASHES_USADOS_SESION] or HASHES_RESPALDO_TON
+    candidatos_tron = [h for h in HASHES_RESPALDO_TRON if h not in HASHES_USADOS_SESION] or HASHES_
 # --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
@@ -496,7 +548,7 @@ def obtener_menu_principal(idioma="es"):
             ],
             [
                 InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
-                InlineKeyboardButton("📢 Canal de Comprobantes", url=LINK_CANAL),
+                InlineKeyboardButton("📢 Comprobantes", url=LINK_CANAL),
             ],
             [
                 InlineKeyboardButton("🌐 Cambiar Idioma", callback_data="btn_cambiar_idioma"),
@@ -563,6 +615,8 @@ def teclado_confirmar_retiro_anticipado(idioma="es"):
         ],
         [InlineKeyboardButton("⬅️ Menú Principal", callback_data="lang_es")],
     ])
+
+
 def texto_wallets_deposito(idioma="es"):
     if idioma == "en":
         encabezado = "💳 **Official Deposit Wallets (5 Networks)**:\n\n"
