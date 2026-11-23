@@ -8,7 +8,7 @@ from threading import Thread
 import aiohttp
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import NetworkError, TimedOut, TelegramError
+from telegram.error import Conflict, NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -606,8 +606,6 @@ async def tarea_comprobaciones_canal(bot):
     except asyncio.CancelledError:
         print("Tarea de comprobaciones cancelada limpiamente.", flush=True)
         raise
-
-
 # --- TECLADOS INLINE CORTOS Y CLAROS ---
 def obtener_menu_idiomas():
     return InlineKeyboardMarkup([
@@ -1565,14 +1563,28 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     err = context.error
+    if isinstance(err, Conflict):
+        print(
+            "Aviso temporal de Conflict en getUpdates (instancia previa cerrando); se reintentará.",
+            flush=True,
+        )
+        return
     if isinstance(err, (NetworkError, TimedOut)):
-        print(f"Aviso de red temporal en PTB (se reintentará automáticamente): {err}", flush=True)
+        print(
+            f"Aviso de red temporal en PTB (se reintentará automáticamente): {err}",
+            flush=True,
+        )
         return
     print(f"Excepción no controlada en PTB: {err}", flush=True)
 
 
 async def post_init(application):
-    await application.bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(4)
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        print(f"Aviso al limpiar webhook en post_init: {e}", flush=True)
+
     application.bot_data["tarea_comprobaciones"] = asyncio.create_task(
         tarea_comprobaciones_canal(application.bot)
     )
@@ -1625,7 +1637,12 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
 
     print("Iniciando polling de Telegram...", flush=True)
-    application.run_polling(drop_pending_updates=True, poll_interval=1.0, timeout=20)
+    application.run_polling(
+        drop_pending_updates=True,
+        poll_interval=1.5,
+        timeout=20,
+        bootstrap_retries=5,
+    )
 
 
 if __name__ == "__main__":
