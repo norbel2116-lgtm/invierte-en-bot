@@ -28,6 +28,7 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
+    print(f"Arrancando servidor web Flask en puerto {port}...", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
@@ -268,7 +269,7 @@ def inicializar_db():
                     (h_tron, "TRON", "USDT", 25.0, "respaldo_tron", fecha_respaldo),
                 )
     except Exception as e:
-        print(f"Error inicializando BD: {e}")
+        print(f"Error inicializando BD: {e}", flush=True)
 
 
 inicializar_db()
@@ -325,7 +326,7 @@ def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float)
                 (tx_hash, red, moneda, monto, "publicado_canal", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
     except Exception as e:
-        print(f"Error guardando hash publicado: {e}")
+        print(f"Error guardando hash publicado: {e}", flush=True)
 
 
 def _cumple_filtro_monto(monto: float, tipo_operacion: str = "deposito") -> bool:
@@ -478,7 +479,7 @@ async def _obtener_tx_evm_rpc(
                             "verificado": f"Real en bloque ({red_key})",
                         }
         except Exception as e:
-            print(f"Error RPC {red_key} ({rpc_url}): {e}")
+            print(f"Error RPC {red_key} ({rpc_url}): {e}", flush=True)
     return None
 
 
@@ -561,52 +562,58 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
                 if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
                     return comp
             except Exception as e:
-                print(f"Error consultando blockchain {red_key}: {e}")
+                print(f"Error consultando blockchain {red_key}: {e}", flush=True)
 
     return None
 
 
 async def tarea_comprobaciones_canal(bot):
     await asyncio.sleep(10)
-    while True:
-        try:
-            if CHANNEL_ID and str(CHANNEL_ID) != "-1001234567890":
-                cantidad_envios = random.randint(1, 5)
-                enviados = 0
+    try:
+        while True:
+            try:
+                if CHANNEL_ID and str(CHANNEL_ID) != "-1001234567890":
+                    cantidad_envios = random.randint(1, 5)
+                    enviados = 0
 
-                for _ in range(cantidad_envios):
-                    tipo_op = random.choice(["deposito", "retiro"])
-                    comp = await obtener_comprobante_multired(tipo_op)
-                    if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
-                        usuario = generar_usuario_ficticio()
-                        etiqueta_tipo = "Depósito" if tipo_op == "deposito" else "Retiro"
-                        texto = (
-                            f"📢 **Comprobante de {etiqueta_tipo}**\n\n"
-                            f"• **Usuario:** `{usuario}`\n"
-                            f"• **Monto:** `{comp['monto']} {comp['moneda']}`\n"
-                            f"• **Red:** `{comp['red']}`\n"
-                            f"• **Hash:** `{comp['hash']}`\n"
-                            f"• **Explorador:** {comp['explorer']}"
-                        )
-                        await bot.send_message(
-                            chat_id=CHANNEL_ID,
-                            text=texto,
-                            parse_mode="Markdown",
-                            disable_web_page_preview=True,
-                        )
-                        _registrar_hash_publicado(
-                            comp["hash"], comp["red"], comp["moneda"], comp["monto"]
-                        )
-                        enviados += 1
-                        await asyncio.sleep(2)
+                    for _ in range(cantidad_envios):
+                        tipo_op = random.choice(["deposito", "retiro"])
+                        comp = await obtener_comprobante_multired(tipo_op)
+                        if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
+                            usuario = generar_usuario_ficticio()
+                            etiqueta_tipo = "Depósito" if tipo_op == "deposito" else "Retiro"
+                            texto = (
+                                f"📢 **Comprobante de {etiqueta_tipo}**\n\n"
+                                f"• **Usuario:** `{usuario}`\n"
+                                f"• **Monto:** `{comp['monto']} {comp['moneda']}`\n"
+                                f"• **Red:** `{comp['red']}`\n"
+                                f"• **Hash:** `{comp['hash']}`\n"
+                                f"• **Explorador:** {comp['explorer']}"
+                            )
+                            await bot.send_message(
+                                chat_id=CHANNEL_ID,
+                                text=texto,
+                                parse_mode="Markdown",
+                                disable_web_page_preview=True,
+                            )
+                            _registrar_hash_publicado(
+                                comp["hash"], comp["red"], comp["moneda"], comp["monto"]
+                            )
+                            enviados += 1
+                            await asyncio.sleep(2)
 
-                print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}")
-        except Exception as e:
-            print(f"Error en tarea_comprobaciones_canal: {e}")
+                    print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"Error en tarea_comprobaciones_canal: {e}", flush=True)
 
-        espera_segundos = random.randint(300, 1200)
-        print(f"Próximo ciclo de comprobantes en {espera_segundos // 60} min ({espera_segundos}s)")
-        await asyncio.sleep(espera_segundos)
+            espera_segundos = random.randint(300, 1200)
+            print(f"Próximo ciclo de comprobantes en {espera_segundos // 60} min ({espera_segundos}s)", flush=True)
+            await asyncio.sleep(espera_segundos)
+    except asyncio.CancelledError:
+        print("Tarea de comprobaciones cancelada limpiamente.", flush=True)
+        raise
 
 
 # --- TECLADOS INLINE CORTOS Y CLAROS ---
@@ -872,7 +879,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                     )
                 except Exception as e:
-                    print(f"No se pudo notificar al patrocinador: {e}")
+                    print(f"No se pudo notificar al patrocinador: {e}", flush=True)
 
         cursor.execute(
             "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
@@ -890,7 +897,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
     except Exception as e:
-        print(f"Error en start: {e}")
+        print(f"Error en start: {e}", flush=True)
 
 
 async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAULT_TYPE, idioma: str):
@@ -970,7 +977,7 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                     parse_mode="Markdown",
                 )
             except Exception as e:
-                print(f"Error notificando retiro al admin: {e}")
+                print(f"Error notificando retiro al admin: {e}", flush=True)
 
             texto_ok = (
                 f"✅ **Retiro Anticipado Registrado**\n\n"
@@ -1002,11 +1009,11 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         return
 
-    print(f"Callback recibido: {query.data} de user={query.from_user.id}")
+    print(f"Callback recibido: {query.data} de user={query.from_user.id}", flush=True)
     try:
         await query.answer()
     except Exception as e:
-        print(f"Error en query.answer(): {e}")
+        print(f"Error en query.answer(): {e}", flush=True)
 
     data = query.data
     user = query.from_user
@@ -1044,7 +1051,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error al editar idioma: {e}")
+            print(f"Error al editar idioma: {e}", flush=True)
         return
 
     with sqlite3.connect("usuarios.db", timeout=15) as conn:
@@ -1094,7 +1101,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_saldo: {e}")
+            print(f"Error en btn_saldo: {e}", flush=True)
 
     elif data == "btn_liquidez":
         with sqlite3.connect("usuarios.db", timeout=15) as conn:
@@ -1112,7 +1119,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_liquidez: {e}")
+            print(f"Error en btn_liquidez: {e}", flush=True)
 
     elif data == "btn_planes":
         bloques_planes = []
@@ -1134,7 +1141,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=teclado_planes_y_redes(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_planes: {e}")
+            print(f"Error en btn_planes: {e}", flush=True)
 
     elif data.startswith("sel_plan_"):
         plan_id = data.replace("sel_plan_", "")
@@ -1152,7 +1159,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=teclado_reinversion(plan_id, idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en sel_plan: {e}")
+            print(f"Error en sel_plan: {e}", flush=True)
 
     elif data.startswith("reinv_"):
         partes = data.split("_")
@@ -1172,7 +1179,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=teclado_montos_inversion(plan_id, idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en reinv: {e}")
+            print(f"Error en reinv: {e}", flush=True)
 
     elif data.startswith("otro_monto_"):
         plan_id = data.replace("otro_monto_", "")
@@ -1194,7 +1201,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en otro_monto: {e}")
+            print(f"Error en otro_monto: {e}", flush=True)
 
     elif data.startswith("monto_"):
         partes = data.split("_")
@@ -1213,7 +1220,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en monto: {e}")
+            print(f"Error en monto: {e}", flush=True)
 
     elif data.startswith("invred_"):
         partes = data.split("_")
@@ -1227,7 +1234,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en invred: {e}")
+            print(f"Error en invred: {e}", flush=True)
 
     elif data.startswith("red_"):
         red_key = data.replace("red_", "")
@@ -1243,7 +1250,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
             except Exception as e:
-                print(f"Error en red: {e}")
+                print(f"Error en red: {e}", flush=True)
 
     elif data == "btn_depositar":
         try:
@@ -1253,14 +1260,14 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
             )
         except Exception as e:
-            print(f"Error en btn_depositar: {e}")
+            print(f"Error en btn_depositar: {e}", flush=True)
 
     elif data == "btn_referidos":
         texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_referidos: {e}")
+            print(f"Error en btn_referidos: {e}", flush=True)
 
     elif data == "btn_reportar_hash":
         with sqlite3.connect("usuarios.db", timeout=15) as conn:
@@ -1282,7 +1289,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_reportar_hash: {e}")
+            print(f"Error en btn_reportar_hash: {e}", flush=True)
 
     elif data == "btn_soporte":
         with sqlite3.connect("usuarios.db", timeout=15) as conn:
@@ -1295,7 +1302,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
-            print(f"Error en btn_soporte: {e}")
+            print(f"Error en btn_soporte: {e}", flush=True)
 
 
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1424,7 +1431,7 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown",
                 )
             except Exception as e:
-                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
+                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}", flush=True)
             patrocinador_actual = patrocinador_id
 
     await update.message.reply_text(
@@ -1513,7 +1520,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                     )
                 except Exception as e:
-                    print(f"Error notificando hash al admin: {e}")
+                    print(f"Error notificando hash al admin: {e}", flush=True)
 
             await update.message.reply_text(
                 f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
@@ -1540,7 +1547,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                     )
                 except Exception as e:
-                    print(f"Error enviando soporte al admin: {e}")
+                    print(f"Error enviando soporte al admin: {e}", flush=True)
 
             await update.message.reply_text(
                 "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
@@ -1573,14 +1580,15 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    application = (
-    ApplicationBuilder()
-    .token(TOKEN)
-    .post_init(post_init)
-    .post_shutdown(post_shutdown)
-    .build()
-)
+    Thread(target=run_web, daemon=True).start()
 
+    application = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
@@ -1591,7 +1599,7 @@ def main():
     application.add_handler(CallbackQueryHandler(boton_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
 
-    print("Iniciando polling de Telegram...")
+    print("Iniciando polling de Telegram...", flush=True)
     application.run_polling(drop_pending_updates=True)
 
 
