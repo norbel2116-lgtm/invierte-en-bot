@@ -1400,4 +1400,17 @@ async def main():
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
     await app_bot.initialize()
-    await app_bot.start
+    await app_bot.start()
+    await app_bot.updater.start_polling()
+
+    asyncio.create_task(tarea_comprobaciones_canal(app_bot.bot))
+
+    stop_event = asyncio.Event()
+    await stop_event.wait()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot detenido correctamente.")
