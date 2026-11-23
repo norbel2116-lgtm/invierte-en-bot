@@ -92,7 +92,13 @@ HASHES_RESPALDO_TON = [
 ]
 
 HASHES_RESPALDO_TRON = [
+    "b6ea2bbf397db123c0129b530c056d828b761ed376b80e8fd5adfd7590c88b87",
     "94dc2877a6601436dc447a48e62a20f071ac8fc1bdd877e4a6d8489ce397f4c6",
+    "925fc6f8bc0025b566328963ddb4204008aa6aa30c5b1d2992d46111f47048dc",
+    "34868cbc8a07b1904bb27564ba92105707b27af38606a829e7376f5b8bf7961c",
+    "a77fe87c31bcf5faf116226c3747a47ee7a927a2b9a3c6f2e9e35a3233c16a4f",
+    "ac73ce4600cf0f1d444de841aaf71e697b6e591c230f27c2143f25c1eb6d8620",
+    "1767b236bbe823c3724118ffd6f3d25d1227a4a259f5482438cdc78a795cda8d",
     "d654d283158a4706531e226ec690bbeaaefe24b51ac9c6b2ddd9236a39f387b1",
 ]
 
@@ -322,12 +328,10 @@ def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float)
         print(f"Error guardando hash publicado: {e}")
 
 
-def _cumple_filtro_monto(monto: float, tipo_operacion: str) -> bool:
+def _cumple_filtro_monto(monto: float, tipo_operacion: str = "deposito") -> bool:
     if monto is None or monto <= 0:
         return False
-    if tipo_operacion == "deposito":
-        return monto >= MIN_MONTO_INVERSION
-    return True
+    return monto >= MIN_MONTO_INVERSION
 
 
 async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
@@ -567,30 +571,42 @@ async def tarea_comprobaciones_canal(bot):
     while True:
         try:
             if CHANNEL_ID and str(CHANNEL_ID) != "-1001234567890":
-                comp = await obtener_comprobante_multired("retiro")
-                if comp and not _hash_ya_publicado(comp["hash"]):
-                    usuario = generar_usuario_ficticio()
-                    texto = (
-                        f"📢 **Comprobante de Operación**\n\n"
-                        f"• **Usuario:** `{usuario}`\n"
-                        f"• **Monto:** `{comp['monto']} {comp['moneda']}`\n"
-                        f"• **Red:** `{comp['red']}`\n"
-                        f"• **Hash:** `{comp['hash']}`\n"
-                        f"• **Explorador:** {comp['explorer']}"
-                    )
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=texto,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True,
-                    )
-                    _registrar_hash_publicado(
-                        comp["hash"], comp["red"], comp["moneda"], comp["monto"]
-                    )
+                cantidad_envios = random.randint(1, 5)
+                enviados = 0
+
+                for _ in range(cantidad_envios):
+                    tipo_op = random.choice(["deposito", "retiro"])
+                    comp = await obtener_comprobante_multired(tipo_op)
+                    if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
+                        usuario = generar_usuario_ficticio()
+                        etiqueta_tipo = "Depósito" if tipo_op == "deposito" else "Retiro"
+                        texto = (
+                            f"📢 **Comprobante de {etiqueta_tipo}**\n\n"
+                            f"• **Usuario:** `{usuario}`\n"
+                            f"• **Monto:** `{comp['monto']} {comp['moneda']}`\n"
+                            f"• **Red:** `{comp['red']}`\n"
+                            f"• **Hash:** `{comp['hash']}`\n"
+                            f"• **Explorador:** {comp['explorer']}"
+                        )
+                        await bot.send_message(
+                            chat_id=CHANNEL_ID,
+                            text=texto,
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True,
+                        )
+                        _registrar_hash_publicado(
+                            comp["hash"], comp["red"], comp["moneda"], comp["monto"]
+                        )
+                        enviados += 1
+                        await asyncio.sleep(2)
+
+                print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}")
         except Exception as e:
             print(f"Error en tarea_comprobaciones_canal: {e}")
 
-        await asyncio.sleep(3600)
+        espera_segundos = random.randint(300, 1200)
+        print(f"Próximo ciclo de comprobantes en {espera_segundos // 60} min ({espera_segundos}s)")
+        await asyncio.sleep(espera_segundos)
 
 
 # --- TECLADOS INLINE CORTOS Y CLAROS ---
