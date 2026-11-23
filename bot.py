@@ -8,6 +8,7 @@ from threading import Thread
 import aiohttp
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import NetworkError, TimedOut, TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -16,12 +17,14 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+from telegram.request import HTTPXRequest
 
 # --- SERVIDOR WEB FLASK (HILO SECUNDARIO) ---
 app = Flask("")
 
 
 @app.route("/")
+@app.route("/health")
 def home():
     return "Bot Activo y Funcionando Correctamente", 200
 
@@ -36,6 +39,7 @@ TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
+DB_PATH = os.getenv("DB_PATH", "usuarios.db")
 
 # --- 5 WALLETS Y REDES OFICIALES ---
 WALLETS_OFICIALES = {
@@ -186,10 +190,17 @@ PLANES_INVERSION = {
 }
 
 
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
+
+
 # --- BASE DE DATOS SQLITE ---
 def inicializar_db():
     try:
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -305,7 +316,7 @@ def _hash_ya_publicado(tx_hash: str) -> bool:
     if tx_hash in HASHES_USADOS_SESION:
         return True
     try:
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT 1 FROM comprobantes_verificados WHERE tx_hash = ? AND tipo = 'publicado_canal' LIMIT 1",
@@ -319,7 +330,7 @@ def _hash_ya_publicado(tx_hash: str) -> bool:
 def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float):
     _marcar_hash_usado(tx_hash)
     try:
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
@@ -337,7 +348,7 @@ def _cumple_filtro_monto(monto: float, tipo_operacion: str = "deposito") -> bool
 
 async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
     url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=25"
-    async with session.get(url, timeout=10) as resp:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
@@ -366,7 +377,7 @@ async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tip
 
 async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
     url = f"https://mempool.space/api/address/{address}/txs"
-    async with session.get(url, timeout=10) as resp:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
         if resp.status != 200:
             return None
         txs = await resp.json()
@@ -402,7 +413,7 @@ async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo
 
 async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
     url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=25"
-    async with session.get(url, timeout=10) as resp:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
@@ -436,10 +447,11 @@ async def _obtener_tx_evm_rpc(
     simbolo: str,
     tipo_operacion: str = "deposito",
 ):
+    req_timeout = aiohttp.ClientTimeout(total=10)
     for rpc_url in rpc_urls:
         try:
             payload_latest = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-            async with session.post(rpc_url, json=payload_latest, timeout=10) as resp:
+            async with session.post(rpc_url, json=payload_latest, timeout=req_timeout) as resp:
                 if resp.status != 200:
                     continue
                 data_latest = await resp.json()
@@ -456,7 +468,7 @@ async def _obtener_tx_evm_rpc(
                     "params": [target_hex, True],
                     "id": 2,
                 }
-                async with session.post(rpc_url, json=payload_block, timeout=10) as resp_blk:
+                async with session.post(rpc_url, json=payload_block, timeout=req_timeout) as resp_blk:
                     if resp_blk.status != 200:
                         continue
                     blk_json = await resp_blk.json()
@@ -500,32 +512,6 @@ async def obtener_tx_real_eth(session: aiohttp.ClientSession, _address: str, tip
     return await _obtener_tx_evm_rpc(session, rpcs_eth, "ETH", "ETH", tipo_operacion)
 
 
-def obtener_comprobante_respaldo_local(tipo_operacion: str = "deposito"):
-    min_monto = MIN_MONTO_INVERSION if tipo_operacion == "deposito" else 0.05
-    candidatos_ton = [h for h in HASHES_RESPALDO_TON if h not in HASHES_USADOS_SESION] or HASHES_RESPALDO_TON
-    candidatos_tron = [h for h in HASHES_RESPALDO_TRON if h not in HASHES_USADOS_SESION] or HASHES_RESPALDO_TRON
-
-    if random.choice([True, False]) and candidatos_ton:
-        tx_hash = random.choice(candidatos_ton)
-        red_key = "TON"
-        moneda = "TON"
-        monto = round(random.uniform(max(min_monto, 1.0), 25.0), 4)
-    else:
-        tx_hash = random.choice(candidatos_tron)
-        red_key = "TRON"
-        moneda = "USDT"
-        monto = round(random.uniform(max(min_monto, 3.0), 50.0), 2)
-
-    return {
-        "hash": tx_hash,
-        "monto": monto,
-        "moneda": moneda,
-        "red": REDES_INFO[red_key]["nombre"],
-        "explorer": f"{REDES_INFO[red_key]['explorer']}{tx_hash}",
-        "verificado": "Respaldo local",
-    }
-
-
 def calcular_retiro_anticipado(capital_base: float, moneda: str):
     capital = max(float(capital_base or 0.0), 0.0)
     moneda_upper = (moneda or "USDT").upper()
@@ -551,7 +537,8 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
         "ETH": obtener_tx_real_eth,
     }
 
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
+    async with aiohttp.ClientSession(connector=connector) as session:
         for red_key in orden_redes:
             fn = consultores.get(red_key)
             addr = WALLETS_OFICIALES.get(red_key, "")
@@ -561,6 +548,8 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
                 comp = await fn(session, addr, tipo_operacion)
                 if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
                     return comp
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 print(f"Error consultando blockchain {red_key}: {e}", flush=True)
 
@@ -590,16 +579,19 @@ async def tarea_comprobaciones_canal(bot):
                                 f"• **Hash:** `{comp['hash']}`\n"
                                 f"• **Explorador:** {comp['explorer']}"
                             )
-                            await bot.send_message(
-                                chat_id=CHANNEL_ID,
-                                text=texto,
-                                parse_mode="Markdown",
-                                disable_web_page_preview=True,
-                            )
-                            _registrar_hash_publicado(
-                                comp["hash"], comp["red"], comp["moneda"], comp["monto"]
-                            )
-                            enviados += 1
+                            try:
+                                await bot.send_message(
+                                    chat_id=CHANNEL_ID,
+                                    text=texto,
+                                    parse_mode="Markdown",
+                                    disable_web_page_preview=True,
+                                )
+                                _registrar_hash_publicado(
+                                    comp["hash"], comp["red"], comp["moneda"], comp["monto"]
+                                )
+                                enviados += 1
+                            except TelegramError as te:
+                                print(f"Error enviando comprobante al canal: {te}", flush=True)
                             await asyncio.sleep(2)
 
                     print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}", flush=True)
@@ -785,7 +777,8 @@ def texto_wallets_deposito(idioma="es"):
 
 
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
-    link_referido = f"https://t.me/{username_bot}?start={user_id}"
+    bot_user = username_bot or "TuBot"
+    link_referido = f"https://t.me/{bot_user}?start={user_id}"
     if idioma == "en":
         return (
             f"🌟 **Welcome! We are glad you want to join**\n\n"
@@ -817,7 +810,7 @@ async def registrar_solicitud_inversion(
     plan = PLANES_INVERSION[plan_id]
     wallet = WALLETS_OFICIALES[red_solicitada]
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -852,12 +845,17 @@ async def registrar_solicitud_inversion(
         f"💳 **Envía a esta dirección:**\n`{wallet}`\n\n"
         f"📲 **Luego toca Reportar Hash** en el menú o usa `/notificar [Tu_Hash]`"
     )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if not user:
+        return
     args = context.args
     patrocinador_id = int(args[0]) if args and args[0].isdigit() else None
+    notificar_patrocinador = False
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT user_id, patrocinador_id FROM usuarios WHERE user_id = ?", (user.id,))
         existe = cursor.fetchone()
@@ -867,24 +865,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "INSERT INTO usuarios (user_id, nombre, patrocinador_id, idioma) VALUES (?, ?, ?, ?)",
                 (user.id, user.first_name, patrocinador_id, "es"),
             )
-
             if patrocinador_id and patrocinador_id != user.id:
-                try:
-                    await context.bot.send_message(
-                        chat_id=patrocinador_id,
-                        text=(
-                            f"🎉 **¡Nuevo Referido Detectado!**\n\n"
-                            f"El usuario **{user.first_name}** se unió a tu red de referidos."
-                        ),
-                        parse_mode="Markdown",
-                    )
-                except Exception as e:
-                    print(f"No se pudo notificar al patrocinador: {e}", flush=True)
+                notificar_patrocinador = True
 
         cursor.execute(
             "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
             (user.id,),
         )
+
+    if notificar_patrocinador and patrocinador_id:
+        try:
+            await context.bot.send_message(
+                chat_id=patrocinador_id,
+                text=(
+                    f"🎉 **¡Nuevo Referido Detectado!**\n\n"
+                    f"El usuario **{user.first_name}** se unió a tu red de referidos."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            print(f"No se pudo notificar al patrocinador: {e}", flush=True)
 
     texto = "🌐 **Welcome / Bienvenido**\n\nSelecciona tu idioma / Select your language:"
     try:
@@ -905,7 +905,7 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
     data = query.data
     user_id = query.from_user.id
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT deposito_activo, moneda_deposito, red_deposito FROM usuarios WHERE user_id = ?",
@@ -948,8 +948,8 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
             await query.message.edit_text(texto, reply_markup=teclado_confirmar_retiro_anticipado(idioma), parse_mode="Markdown")
             return
 
+        calc = calcular_retiro_anticipado(deposito_activo, moneda)
         if data == "confirm_retiro_anticipado":
-            calc = calcular_retiro_anticipado(deposito_activo, moneda)
             if calc["capital_base"] <= 0:
                 await query.message.edit_text("⚠️ Sin saldo activo.", reply_markup=obtener_menu_principal(idioma))
                 return
@@ -963,45 +963,46 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                 (user_id,),
             )
 
-            try:
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        f"💸 **Retiro Anticipado Solicitado**\n\n"
-                        f"• **Usuario ID:** `{user_id}`\n"
-                        f"• **Red:** `{red}`\n"
-                        f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}`\n"
-                        f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                        f"• **Neto a Enviar:** `{calc['neto_a_recibir']} {calc['moneda']}`"
-                    ),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                print(f"Error notificando retiro al admin: {e}", flush=True)
-
-            texto_ok = (
-                f"✅ **Retiro Anticipado Registrado**\n\n"
-                f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
-                f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                f"• **Ganancias:** `Anuladas por retiro anticipado`"
-                if idioma == "es"
-                else (
-                    f"✅ **Early Withdrawal Recorded**\n\n"
-                    f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
-                    f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                    f"• **Profits:** `Forfeited due to early withdrawal`"
-                )
+    if data == "confirm_retiro_anticipado":
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"💸 **Retiro Anticipado Solicitado**\n\n"
+                    f"• **Usuario ID:** `{user_id}`\n"
+                    f"• **Red:** `{red}`\n"
+                    f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}`\n"
+                    f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                    f"• **Neto a Enviar:** `{calc['neto_a_recibir']} {calc['moneda']}`"
+                ),
+                parse_mode="Markdown",
             )
-            await query.message.edit_text(texto_ok, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-            return
+        except Exception as e:
+            print(f"Error notificando retiro al admin: {e}", flush=True)
 
-        if data == "cancel_retiro_anticipado":
-            texto_cancel = (
-                "👍 **Retiro cancelado.** Tu inversión sigue activa."
-                if idioma == "es"
-                else "👍 **Withdrawal cancelled.** Your investment remains active."
+        texto_ok = (
+            f"✅ **Retiro Anticipado Registrado**\n\n"
+            f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
+            f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+            f"• **Ganancias:** `Anuladas por retiro anticipado`"
+            if idioma == "es"
+            else (
+                f"✅ **Early Withdrawal Recorded**\n\n"
+                f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
+                f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                f"• **Profits:** `Forfeited due to early withdrawal`"
             )
-            await query.message.edit_text(texto_cancel, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        )
+        await query.message.edit_text(texto_ok, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        return
+
+    if data == "cancel_retiro_anticipado":
+        texto_cancel = (
+            "👍 **Retiro cancelado.** Tu inversión sigue activa."
+            if idioma == "es"
+            else "👍 **Withdrawal cancelled.** Your investment remains active."
+        )
+        await query.message.edit_text(texto_cancel, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
 
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1024,7 +1025,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("lang_"):
         nuevo_idioma = data.split("_")[1]
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR IGNORE INTO usuarios (user_id, nombre, idioma) VALUES (?, ?, ?)",
@@ -1054,7 +1055,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error al editar idioma: {e}", flush=True)
         return
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
         row = cursor.fetchone()
@@ -1065,7 +1066,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "btn_saldo":
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT deposito_activo, moneda_deposito, red_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?",
@@ -1104,7 +1105,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error en btn_saldo: {e}", flush=True)
 
     elif data == "btn_liquidez":
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
             row = cursor.fetchone()
@@ -1185,7 +1186,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan_id = data.replace("otro_monto_", "")
         plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
         context.user_data["plan_elegido"] = plan_id
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE usuarios SET esperando_monto = 1, en_soporte = 0, esperando_hash = 0 WHERE user_id = ?",
@@ -1199,7 +1200,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Envía solo el número (ejemplo: `25`)."
         )
         try:
-            await query.message.edit_text(texto, parse_mode="Markdown")
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
             print(f"Error en otro_monto: {e}", flush=True)
 
@@ -1270,7 +1271,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error en btn_referidos: {e}", flush=True)
 
     elif data == "btn_reportar_hash":
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE usuarios SET esperando_hash = 1, en_soporte = 0, esperando_monto = 0 WHERE user_id = ?",
@@ -1292,7 +1293,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error en btn_reportar_hash: {e}", flush=True)
 
     elif data == "btn_soporte":
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE usuarios SET en_soporte = 1, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
@@ -1339,7 +1340,7 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     hash_tx = " ".join(context.args).strip()
     try:
-        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1355,7 +1356,7 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id != ADMIN_ID:
+    if not user or user.id != ADMIN_ID:
         return
 
     if len(context.args) < 3:
@@ -1380,8 +1381,9 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     tx_hash = context.args[4].strip() if len(context.args) >= 5 else None
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notificaciones = []
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1421,18 +1423,18 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
                 (comision, patrocinador_id),
             )
-            try:
-                await context.bot.send_message(
-                    chat_id=patrocinador_id,
-                    text=(
-                        f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
-                        f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%)."
-                    ),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}", flush=True)
+            notificaciones.append((
+                patrocinador_id,
+                f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%).",
+            ))
             patrocinador_actual = patrocinador_id
+
+    for pat_id, msg in notificaciones:
+        try:
+            await context.bot.send_message(chat_id=pat_id, text=msg, parse_mode="Markdown")
+        except Exception as e:
+            print(f"No se pudo notificar al patrocinador {pat_id}: {e}", flush=True)
 
     await update.message.reply_text(
         f"✅ Depósito aprobado para `{id_usuario}`: `{monto} {moneda}` en `{red}`.",
@@ -1445,9 +1447,11 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user
+    if not user:
+        return
     texto_msg = update.message.text.strip()
 
-    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
@@ -1508,56 +1512,67 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (user.id,),
             )
 
-            if ADMIN_ID:
-                try:
-                    await context.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=(
-                            f"📲 **Nuevo Hash Reportado**\n\n"
-                            f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
-                            f"• **Hash:** `{texto_msg}`"
-                        ),
-                        parse_mode="Markdown",
-                    )
-                except Exception as e:
-                    print(f"Error notificando hash al admin: {e}", flush=True)
+    if esperando_hash:
+        if ADMIN_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"📲 **Nuevo Hash Reportado**\n\n"
+                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                        f"• **Hash:** `{texto_msg}`"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                print(f"Error notificando hash al admin: {e}", flush=True)
 
-            await update.message.reply_text(
-                f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
-                reply_markup=obtener_menu_principal(idioma),
-                parse_mode="Markdown",
-            )
-            return
+        await update.message.reply_text(
+            f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
+            reply_markup=obtener_menu_principal(idioma),
+            parse_mode="Markdown",
+        )
+        return
 
-        if en_soporte:
+    if en_soporte:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
             cursor.execute(
                 "UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?",
                 (user.id,),
             )
 
-            if ADMIN_ID:
-                try:
-                    await context.bot.send_message(
-                        chat_id=ADMIN_ID,
-                        text=(
-                            f"🎧 **Mensaje de Soporte**\n\n"
-                            f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
-                            f"• **Mensaje:** {texto_msg}"
-                        ),
-                        parse_mode="Markdown",
-                    )
-                except Exception as e:
-                    print(f"Error enviando soporte al admin: {e}", flush=True)
+        if ADMIN_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🎧 **Mensaje de Soporte**\n\n"
+                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                        f"• **Mensaje:** {texto_msg}"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                print(f"Error enviando soporte al admin: {e}", flush=True)
 
-            await update.message.reply_text(
-                "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
-                reply_markup=obtener_menu_principal(idioma),
-                parse_mode="Markdown",
-            )
-            return
+        await update.message.reply_text(
+            "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
+            reply_markup=obtener_menu_principal(idioma),
+            parse_mode="Markdown",
+        )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    err = context.error
+    if isinstance(err, (NetworkError, TimedOut)):
+        print(f"Aviso de red temporal en PTB (se reintentará automáticamente): {err}", flush=True)
+        return
+    print(f"Excepción no controlada en PTB: {err}", flush=True)
 
 
 async def post_init(application):
+    await application.bot.delete_webhook(drop_pending_updates=True)
     application.bot_data["tarea_comprobaciones"] = asyncio.create_task(
         tarea_comprobaciones_canal(application.bot)
     )
@@ -1582,14 +1597,24 @@ def main():
 
     Thread(target=run_web, daemon=True).start()
 
+    request = HTTPXRequest(
+        connection_pool_size=20,
+        connect_timeout=15.0,
+        read_timeout=25.0,
+        write_timeout=20.0,
+        pool_timeout=15.0,
+    )
+
     application = (
         ApplicationBuilder()
         .token(TOKEN)
+        .request(request)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()
     )
 
+    application.add_error_handler(error_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
     application.add_handler(CommandHandler("planes", mostrar_planes))
@@ -1600,7 +1625,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
 
     print("Iniciando polling de Telegram...", flush=True)
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling(drop_pending_updates=True, poll_interval=1.0, timeout=20)
 
 
 if __name__ == "__main__":
