@@ -541,12 +541,40 @@ def calcular_retiro_anticipado(capital_base: float, moneda: str):
     }
 
 
+async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
+    orden_redes = ["TRON", "TON", "BTC", "BSC", "ETH"]
+    random.shuffle(orden_redes)
+
+    consultores = {
+        "TRON": obtener_tx_real_tron,
+        "TON": obtener_tx_real_ton,
+        "BTC": obtener_tx_real_btc,
+        "BSC": obtener_tx_real_bsc,
+        "ETH": obtener_tx_real_eth,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        for red_key in orden_redes:
+            fn = consultores.get(red_key)
+            addr = WALLETS_OFICIALES.get(red_key, "")
+            if not fn:
+                continue
+            try:
+                comp = await fn(session, addr, tipo_operacion)
+                if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
+                    return comp
+            except Exception as e:
+                print(f"Error consultando blockchain {red_key}: {e}")
+
+    return None
+
+
 async def tarea_comprobaciones_canal(bot):
     await asyncio.sleep(10)
     while True:
         try:
             if CHANNEL_ID and str(CHANNEL_ID) != "-1001234567890":
-                comp = obtener_comprobante_respaldo_local("retiro")
+                comp = await obtener_comprobante_multired("retiro")
                 if comp and not _hash_ya_publicado(comp["hash"]):
                     usuario = generar_usuario_ficticio()
                     texto = (
@@ -563,11 +591,14 @@ async def tarea_comprobaciones_canal(bot):
                         parse_mode="Markdown",
                         disable_web_page_preview=True,
                     )
-                    _registrar_hash_publicado(comp["hash"], comp["red"], comp["moneda"], comp["monto"])
+                    _registrar_hash_publicado(
+                        comp["hash"], comp["red"], comp["moneda"], comp["monto"]
+                    )
         except Exception as e:
             print(f"Error en tarea_comprobaciones_canal: {e}")
 
         await asyncio.sleep(3600)
+
 # --- TECLADOS INLINE CORTOS Y CLAROS ---
 def obtener_menu_idiomas():
     return InlineKeyboardMarkup([
