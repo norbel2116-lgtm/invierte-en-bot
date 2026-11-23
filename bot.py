@@ -1377,7 +1377,7 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
         try:
-                await context.bot.send_message(
+                       await context.bot.send_message(
                     chat_id=patrocinador_id,
                     text=(
                         f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
@@ -1385,5 +1385,5 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     parse_mode="Markdown",
                 )
-            except Exception as e:
+                    except Exception as e:
                 print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
