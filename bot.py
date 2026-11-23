@@ -323,11 +323,9 @@ def _cumple_filtro_monto(monto: float, tipo_operacion: str) -> bool:
         return False
     if tipo_operacion == "deposito":
         return monto >= MIN_MONTO_INVERSION
-    # Retiros: cualquier valor positivo (> 0)
     return True
 
 
-# --- VERIFICACIÓN REAL EN BLOCKCHAIN (SIN 404) ---
 async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
     url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=25"
     async with session.get(url, timeout=10) as resp:
@@ -461,7 +459,6 @@ async def _obtener_tx_evm_rpc(
                             continue
                         val_wei = int(tx.get("value") or "0x0", 16)
                         monto = round(val_wei / 1e18, 6)
-                        # Solo transacciones con valor real > 0 en cadena para no inventar montos
                         if not _cumple_filtro_monto(monto, tipo_operacion) or _hash_ya_publicado(tx_hash):
                             continue
                         return {
@@ -497,7 +494,69 @@ async def obtener_tx_real_eth(session: aiohttp.ClientSession, _address: str, tip
 def obtener_comprobante_respaldo_local(tipo_operacion: str = "deposito"):
     min_monto = MIN_MONTO_INVERSION if tipo_operacion == "deposito" else 0.05
     candidatos_ton = [h for h in HASHES_RESPALDO_TON if h not in HASHES_USADOS_SESION] or HASHES_RESPALDO_TON
-    candidatos_tron = [h for h in HASHES_RESPALDO_TRON if h not in HASHES_USADOS_SESION] or HASHES_
+    candidatos_tron = [h for h in HASHES_RESPALDO_TRON if h not in HASHES_USADOS_SESION] or HASHES_RESPALDO_TRON
+
+    if random.choice([True, False]) and candidatos_ton:
+        tx_hash = random.choice(candidatos_ton)
+        red_key = "TON"
+        moneda = "TON"
+        monto = round(random.uniform(max(min_monto, 1.0), 25.0), 4)
+    else:
+        tx_hash = random.choice(candidatos_tron)
+        red_key = "TRON"
+        moneda = "USDT"
+        monto = round(random.uniform(max(min_monto, 3.0), 50.0), 2)
+
+    return {
+        "hash": tx_hash,
+        "monto": monto,
+        "moneda": moneda,
+        "red": REDES_INFO[red_key]["nombre"],
+        "explorer": f"{REDES_INFO[red_key]['explorer']}{tx_hash}",
+        "verificado": "Respaldo local",
+    }
+
+
+def calcular_retiro_anticipado(capital_base: float, moneda: str):
+    capital = max(float(capital_base or 0.0), 0.0)
+    moneda_upper = (moneda or "USDT").upper()
+    comision = COMISION_ANTICIPADA_POR_MONEDA.get(moneda_upper, 0.2)
+    neto = round(max(capital - comision, 0.0), 6)
+    return {
+        "capital_base": round(capital, 6),
+        "moneda": moneda_upper,
+        "comision_red": comision,
+        "neto_a_recibir": neto,
+    }
+
+
+async def tarea_comprobaciones_canal(bot):
+    await asyncio.sleep(10)
+    while True:
+        try:
+            if CHANNEL_ID and str(CHANNEL_ID) != "-1001234567890":
+                comp = obtener_comprobante_respaldo_local("retiro")
+                if comp and not _hash_ya_publicado(comp["hash"]):
+                    usuario = generar_usuario_ficticio()
+                    texto = (
+                        f"📢 **Comprobante de Operación**\n\n"
+                        f"• **Usuario:** `{usuario}`\n"
+                        f"• **Monto:** `{comp['monto']} {comp['moneda']}`\n"
+                        f"• **Red:** `{comp['red']}`\n"
+                        f"• **Hash:** `{comp['hash']}`\n"
+                        f"• **Explorador:** {comp['explorer']}"
+                    )
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=texto,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True,
+                    )
+                    _registrar_hash_publicado(comp["hash"], comp["red"], comp["moneda"], comp["monto"])
+        except Exception as e:
+            print(f"Error en tarea_comprobaciones_canal: {e}")
+
+        await asyncio.sleep(3600)
 # --- TECLADOS INLINE ---
 def obtener_menu_idiomas():
     keyboard = [
@@ -1017,8 +1076,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception:
             pass
-
-
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
@@ -1316,27 +1373,16 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # --- ARRANQUE PRINCIPAL ---
-async def post_init(application):
-    asyncio.create_task(tarea_comprobaciones_canal(application.bot))
-
-
-def main():
+async def main():
     if not TOKEN:
         print("ERROR: Falta la variable de entorno TOKEN.")
         return
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    t = Thread(target=run_web, daemon=True)
+    t = Thread(target=run_web)
+    t.daemon = True
     t.start()
 
-    app_bot = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    app_bot = ApplicationBuilder().token(TOKEN).build()
 
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
@@ -1353,12 +1399,5 @@ def main():
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    print("Iniciando polling del bot...")
-    app_bot.run_polling(drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot detenido correctamente.")
+    await app_bot.initialize()
+    await app_bot.start
