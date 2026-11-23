@@ -1386,4 +1386,4 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown",
                 )
                     except Exception as e:
-                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
+                        print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
