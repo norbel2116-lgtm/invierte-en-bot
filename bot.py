@@ -1529,7 +1529,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    conn.close()
+    
 
 
 async def post_init(application):
