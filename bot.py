@@ -1334,7 +1334,11 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     moneda = context.args[2].upper()
-    red = context.args[3].upper() if len(context.args) >= 4 and context.args[3].upper() in WALLETS_OFICIALES else "TRON"
+    red = (
+        context.args[3].upper()
+        if len(context.args) >= 4 and context.args[3].upper() in WALLETS_OFICIALES
+        else "TRON"
+    )
     tx_hash = context.args[4].strip() if len(context.args) >= 5 else None
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1345,45 +1349,212 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
         (monto, moneda, red, fecha_actual, id_usuario),
     )
-            cursor.execute(
-            """
-            INSERT INTO inversiones (
-                user_id, plan_id, modalidad, monto, moneda, red,
-                reinversion_auto, dias_plazo, fecha_inicio, estado
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
-            """,
-            (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
+    cursor.execute(
+        """
+        INSERT INTO inversiones (
+            user_id, plan_id, modalidad, monto, moneda, red,
+            reinversion_auto, dias_plazo, fecha_inicio, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+        """,
+        (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
+    )
+
+    if tx_hash:
+        cursor.execute(
+            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+            (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
         )
 
-        if tx_hash:
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
-            )
+    porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
+    patrocinador_actual = id_usuario
 
-        porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
-        patrocinador_actual = id_usuario
-
-        for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
-            cursor.execute("SELECT patrocinador_id FROM usuarios WHERE user_id = ?", (patrocinador_actual,))
-            resultado = cursor.fetchone()
-            if not resultado or not resultado[0]:
-                break
-            patrocinador_id = resultado[0]
-            comision = monto * porcentaje
-            cursor.execute(
-                "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
-                (comision, patrocinador_id),
+    for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+        cursor.execute(
+            "SELECT patrocinador_id FROM usuarios WHERE user_id = ?",
+            (patrocinador_actual,),
+        )
+        resultado = cursor.fetchone()
+        if not resultado or not resultado[0]:
+            break
+        patrocinador_id = resultado[0]
+        comision = monto * porcentaje
+        cursor.execute(
+            "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+            (comision, patrocinador_id),
+        )
+        conn.commit()
+        try:
+            await context.bot.send_message(
+                chat_id=patrocinador_id,
+                text=(
+                    f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                    f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%)."
+                ),
+                parse_mode="Markdown",
             )
-            conn.commit()
+        except Exception as e:
+            print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
+        patrocinador_actual = patrocinador_id
+
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text(
+        f"✅ Depósito aprobado para `{id_usuario}`: `{monto} {moneda}` en `{red}`.",
+        parse_mode="Markdown",
+    )
+
+
+async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
+    user = update.effective_user
+    texto_msg = update.message.text.strip()
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
+        (user.id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return
+
+    esperando_monto, esperando_hash, en_soporte, idioma = row
+    idioma = idioma or "es"
+
+    if esperando_monto:
+        plan_id = context.user_data.get("plan_elegido", "1")
+        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+        try:
+            monto_val = float(texto_msg.replace(",", "."))
+        except ValueError:
+            conn.close()
+            await update.message.reply_text(
+                "❌ Envía un número válido (ejemplo: `25`).",
+                parse_mode="Markdown",
+            )
+            return
+
+        if monto_val < plan["min"] or monto_val > plan["max"]:
+            conn.close()
+            await update.message.reply_text(
+                f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
+                parse_mode="Markdown",
+            )
+            return
+
+        conn.close()
+        context.user_data["monto_elegido"] = monto_val
+        await update.message.reply_text(
+            f"🌐 **Elige la Red de Pago**\n\n"
+            f"• **Plan:** {plan['nombre']}\n"
+            f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
+            f"Toca la red que vas a usar:",
+            reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
+            parse_mode="Markdown",
+        )
+        return
+
+    if esperando_hash:
+        cursor.execute(
+            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                texto_msg,
+                "TRON",
+                "USDT",
+                0.0,
+                "reporte_usuario",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        cursor.execute(
+            "UPDATE usuarios SET esperando_hash = 0 WHERE user_id = ?",
+            (user.id,),
+        )
+        conn.commit()
+        conn.close()
+
+        if ADMIN_ID:
             try:
                 await context.bot.send_message(
-                    chat_id=patrocinador_id,
+                    chat_id=ADMIN_ID,
                     text=(
-                        f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
-                        f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%)."
+                        f"📲 **Nuevo Hash Reportado**\n\n"
+                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                        f"• **Hash:** `{texto_msg}`"
                     ),
                     parse_mode="Markdown",
                 )
             except Exception as e:
-                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
+                print(f"Error notificando hash al admin: {e}")
+
+        await update.message.reply_text(
+            f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
+            reply_markup=obtener_menu_principal(idioma),
+            parse_mode="Markdown",
+        )
+        return
+
+    if en_soporte:
+        cursor.execute(
+            "UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?",
+            (user.id,),
+        )
+        conn.commit()
+        conn.close()
+
+        if ADMIN_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"🎧 **Mensaje de Soporte**\n\n"
+                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                        f"• **Mensaje:** {texto_msg}"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                print(f"Error enviando soporte al admin: {e}")
+
+        await update.message.reply_text(
+            "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
+            reply_markup=obtener_menu_principal(idioma),
+            parse_mode="Markdown",
+        )
+        return
+
+    conn.close()
+
+
+async def post_init(application):
+    asyncio.create_task(tarea_comprobaciones_canal(application.bot))
+
+
+def main():
+    if not TOKEN:
+        raise RuntimeError("Falta la variable de entorno TOKEN en Render.")
+
+    Thread(target=run_web, daemon=True).start()
+
+    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("saldo", mostrar_saldo))
+    application.add_handler(CommandHandler("planes", mostrar_planes))
+    application.add_handler(CommandHandler("depositar", depositar))
+    application.add_handler(CommandHandler("notificar", notificar_deposito))
+    application.add_handler(CommandHandler("aprobar", aprobar_deposito))
+    application.add_handler(CallbackQueryHandler(boton_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
+
+    application.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
