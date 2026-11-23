@@ -1316,12 +1316,24 @@ async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # --- ARRANQUE PRINCIPAL ---
-async def main():
-    t = Thread(target=run_web)
-    t.daemon = True
+async def post_init(application):
+    asyncio.create_task(tarea_comprobaciones_canal(application.bot))
+
+
+def main():
+    if not TOKEN:
+        print("ERROR: Falta la variable de entorno TOKEN.")
+        return
+
+    t = Thread(target=run_web, daemon=True)
     t.start()
 
-    app_bot = ApplicationBuilder().token(TOKEN).build()
+    app_bot = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
@@ -1338,18 +1350,12 @@ async def main():
     app_bot.add_handler(CallbackQueryHandler(boton_callback))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
 
-    await app_bot.initialize()
-    await app_bot.start()
-    await app_bot.updater.start_polling()
-
-    asyncio.create_task(tarea_comprobaciones_canal(app_bot.bot))
-
-    stop_event = asyncio.Event()
-    await stop_event.wait()
+    print("Iniciando polling del bot...")
+    app_bot.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except (KeyboardInterrupt, SystemExit):
         print("Bot detenido correctamente.")
