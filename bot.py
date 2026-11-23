@@ -113,6 +113,7 @@ COMISION_ANTICIPADA_POR_MONEDA = {
 PLANES_INVERSION = {
     "1": {
         "nombre": "Plan de Inicio (7 días)",
+        "boton": "🟢 Inicio · 7d (0.7%)",
         "modalidad": "plazo_fijo",
         "dias": 7,
         "tasa_ciclo": 0.007,
@@ -125,6 +126,7 @@ PLANES_INVERSION = {
     },
     "2": {
         "nombre": "Plan Crecimiento (14 días)",
+        "boton": "🔵 Crecimiento · 14d (2.4%)",
         "modalidad": "plazo_fijo",
         "dias": 14,
         "tasa_ciclo": 0.024,
@@ -137,6 +139,7 @@ PLANES_INVERSION = {
     },
     "3": {
         "nombre": "Plan Pro / Élite (21 días)",
+        "boton": "🟣 Pro / Élite · 21d (7.8%)",
         "modalidad": "plazo_fijo",
         "dias": 21,
         "tasa_ciclo": 0.078,
@@ -149,6 +152,7 @@ PLANES_INVERSION = {
     },
     "4": {
         "nombre": "Fondo Flexible / Liquidez",
+        "boton": "🟡 Flexible · Liquidez (0.5%)",
         "modalidad": "liquidez_flexible",
         "dias": 0,
         "tasa_ciclo": 0.005,
@@ -161,6 +165,7 @@ PLANES_INVERSION = {
     },
     "5": {
         "nombre": "Meta / Aporte Escalonado",
+        "boton": "🟠 Meta · 30d (3.2%)",
         "modalidad": "aporte_meta",
         "dias": 30,
         "tasa_ciclo": 0.032,
@@ -190,6 +195,7 @@ def inicializar_db():
                 fecha_deposito TEXT,
                 ganancias_referidos REAL DEFAULT 0,
                 en_soporte INTEGER DEFAULT 0,
+                esperando_monto INTEGER DEFAULT 0,
                 idioma TEXT DEFAULT 'es'
             )
         """)
@@ -231,6 +237,8 @@ def inicializar_db():
         columnas = [col[1] for col in cursor.fetchall()]
         if "red_deposito" not in columnas:
             cursor.execute("ALTER TABLE usuarios ADD COLUMN red_deposito TEXT DEFAULT 'TRON'")
+        if "esperando_monto" not in columnas:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_monto INTEGER DEFAULT 0")
 
         cursor.execute("SELECT COUNT(*) FROM liquidez_global")
         if cursor.fetchone()[0] == 0:
@@ -557,73 +565,68 @@ async def tarea_comprobaciones_canal(bot):
             print(f"Error en tarea_comprobaciones_canal: {e}")
 
         await asyncio.sleep(3600)
-# --- TECLADOS INLINE ---
+# --- TECLADOS INLINE CORTOS Y CLAROS ---
 def obtener_menu_idiomas():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es"),
             InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
         ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 
 def obtener_menu_principal(idioma="es"):
     if idioma == "en":
-        keyboard = [
+        return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("💰 My Balance", callback_data="btn_saldo"),
-                InlineKeyboardButton("🏦 Liquidity Pool", callback_data="btn_liquidez"),
+                InlineKeyboardButton("💰 Balance", callback_data="btn_saldo"),
+                InlineKeyboardButton("🏦 Pool", callback_data="btn_liquidez"),
             ],
             [
-                InlineKeyboardButton("📋 Plans & Invest", callback_data="btn_planes"),
-                InlineKeyboardButton("💳 Deposit", callback_data="btn_depositar"),
+                InlineKeyboardButton("📈 Invest", callback_data="btn_planes"),
+                InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
             ],
             [
                 InlineKeyboardButton("👥 Referrals", callback_data="btn_referidos"),
-                InlineKeyboardButton("🏦 Withdraw", callback_data="btn_retirar"),
+                InlineKeyboardButton("💸 Withdraw", callback_data="btn_retirar"),
             ],
             [
                 InlineKeyboardButton("🎧 Support", callback_data="btn_soporte"),
-                InlineKeyboardButton("📢 Proofs Channel", url=LINK_CANAL),
+                InlineKeyboardButton("📢 Proofs", url=LINK_CANAL),
             ],
             [
-                InlineKeyboardButton("🌐 Change Language", callback_data="btn_cambiar_idioma"),
+                InlineKeyboardButton("🌐 Language", callback_data="btn_cambiar_idioma"),
             ],
-        ]
-    else:
-        keyboard = [
-            [
-                InlineKeyboardButton("💰 Mi Saldo", callback_data="btn_saldo"),
-                InlineKeyboardButton("🏦 Fondo de Liquidez", callback_data="btn_liquidez"),
-            ],
-            [
-                InlineKeyboardButton("📋 Planes e Invertir", callback_data="btn_planes"),
-                InlineKeyboardButton("💳 Depositar", callback_data="btn_depositar"),
-            ],
-            [
-                InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
-                InlineKeyboardButton("🏦 Retirar", callback_data="btn_retirar"),
-            ],
-            [
-                InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
-                InlineKeyboardButton("📢 Comprobantes", url=LINK_CANAL),
-            ],
-            [
-                InlineKeyboardButton("🌐 Cambiar Idioma", callback_data="btn_cambiar_idioma"),
-            ],
-        ]
-    return InlineKeyboardMarkup(keyboard)
+        ])
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💰 Mi Saldo", callback_data="btn_saldo"),
+            InlineKeyboardButton("🏦 Liquidez", callback_data="btn_liquidez"),
+        ],
+        [
+            InlineKeyboardButton("📈 Invertir", callback_data="btn_planes"),
+            InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
+        ],
+        [
+            InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
+            InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
+        ],
+        [
+            InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
+            InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
+        ],
+        [
+            InlineKeyboardButton("🌐 Idioma", callback_data="btn_cambiar_idioma"),
+        ],
+    ])
 
 
 def teclado_planes_y_redes(idioma="es"):
     filas = []
     for key, plan in PLANES_INVERSION.items():
         filas.append([
-            InlineKeyboardButton(
-                f"{plan['nombre']} ({plan['tasa_ciclo']*100:.1f}%)",
-                callback_data=f"sel_plan_{key}",
-            )
+            InlineKeyboardButton(plan["boton"], callback_data=f"sel_plan_{key}")
         ])
     filas.append([
         InlineKeyboardButton("TRON", callback_data="red_TRON"),
@@ -634,7 +637,7 @@ def teclado_planes_y_redes(idioma="es"):
         InlineKeyboardButton("BSC", callback_data="red_BSC"),
         InlineKeyboardButton("ETH", callback_data="red_ETH"),
     ])
-    volver_txt = "⬅️ Menú Principal" if idioma == "es" else "⬅️ Main Menu"
+    volver_txt = "⬅️ Menú" if idioma == "es" else "⬅️ Menu"
     volver_cb = "lang_es" if idioma == "es" else "lang_en"
     filas.append([InlineKeyboardButton(volver_txt, callback_data=volver_cb)])
     return InlineKeyboardMarkup(filas)
@@ -643,36 +646,72 @@ def teclado_planes_y_redes(idioma="es"):
 def teclado_reinversion(plan_id: str, idioma="es"):
     if idioma == "en":
         return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("♻️ Auto-Reinvest: ON", callback_data=f"reinv_{plan_id}_1"),
-                InlineKeyboardButton("💵 Auto-Reinvest: OFF", callback_data=f"reinv_{plan_id}_0"),
-            ],
-            [InlineKeyboardButton("⬅️ Back to Plans", callback_data="btn_planes")],
+            [InlineKeyboardButton("♻️ Auto-Reinvest: ON", callback_data=f"reinv_{plan_id}_1")],
+            [InlineKeyboardButton("💵 Auto-Reinvest: OFF", callback_data=f"reinv_{plan_id}_0")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="btn_planes")],
         ])
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("♻️ Reinversión Auto: SÍ", callback_data=f"reinv_{plan_id}_1"),
-            InlineKeyboardButton("💵 Reinversión Auto: NO", callback_data=f"reinv_{plan_id}_0"),
-        ],
-        [InlineKeyboardButton("⬅️ Volver a Planes", callback_data="btn_planes")],
+        [InlineKeyboardButton("♻️ Reinversión: SÍ", callback_data=f"reinv_{plan_id}_1")],
+        [InlineKeyboardButton("💵 Reinversión: NO", callback_data=f"reinv_{plan_id}_0")],
+        [InlineKeyboardButton("⬅️ Volver", callback_data="btn_planes")],
     ])
+
+
+def teclado_montos_inversion(plan_id: str, idioma="es"):
+    plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+    moneda = plan["moneda"]
+    sugeridos = [5, 10, 20, 50, 100]
+    validos = [m for m in sugeridos if plan["min"] <= m <= plan["max"]]
+    if not validos:
+        validos = [int(plan["min"]) if plan["min"].is_integer() else plan["min"]]
+
+    filas = []
+    fila_actual = []
+    for m in validos:
+        fila_actual.append(InlineKeyboardButton(f"{m} {moneda}", callback_data=f"monto_{plan_id}_{m}"))
+        if len(fila_actual) == 2:
+            filas.append(fila_actual)
+            fila_actual = []
+    if fila_actual:
+        filas.append(fila_actual)
+
+    txt_otro = "✏️ Otro monto" if idioma == "es" else "✏️ Custom amount"
+    txt_volver = "⬅️ Volver" if idioma == "es" else "⬅️ Back"
+    filas.append([InlineKeyboardButton(txt_otro, callback_data=f"otro_monto_{plan_id}")])
+    filas.append([InlineKeyboardButton(txt_volver, callback_data=f"sel_plan_{plan_id}")])
+    return InlineKeyboardMarkup(filas)
+
+
+def teclado_redes_inversion(plan_id: str, monto: float, idioma="es"):
+    filas = [
+        [
+            InlineKeyboardButton("TRON", callback_data=f"invred_{plan_id}_{monto}_TRON"),
+            InlineKeyboardButton("TON", callback_data=f"invred_{plan_id}_{monto}_TON"),
+            InlineKeyboardButton("BTC", callback_data=f"invred_{plan_id}_{monto}_BTC"),
+        ],
+        [
+            InlineKeyboardButton("BSC", callback_data=f"invred_{plan_id}_{monto}_BSC"),
+            InlineKeyboardButton("ETH", callback_data=f"invred_{plan_id}_{monto}_ETH"),
+        ],
+        [
+            InlineKeyboardButton(
+                "⬅️ Montos" if idioma == "es" else "⬅️ Amounts",
+                callback_data=f"reinv_{plan_id}_{1 if False else 0}",
+            )
+        ],
+    ]
+    return InlineKeyboardMarkup(filas)
 
 
 def teclado_confirmar_retiro_anticipado(idioma="es"):
     if idioma == "en":
         return InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Confirm Early Withdrawal", callback_data="confirm_retiro_anticipado"),
-                InlineKeyboardButton("❌ Keep Investment", callback_data="cancel_retiro_anticipado"),
-            ],
-            [InlineKeyboardButton("⬅️ Main Menu", callback_data="lang_en")],
+            [InlineKeyboardButton("✅ Confirm Withdrawal", callback_data="confirm_retiro_anticipado")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_retiro_anticipado")],
         ])
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirmar Retiro Anticipado", callback_data="confirm_retiro_anticipado"),
-            InlineKeyboardButton("❌ Mantener Inversión", callback_data="cancel_retiro_anticipado"),
-        ],
-        [InlineKeyboardButton("⬅️ Menú Principal", callback_data="lang_es")],
+        [InlineKeyboardButton("✅ Confirmar Retiro", callback_data="confirm_retiro_anticipado")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_retiro_anticipado")],
     ])
 
 
@@ -715,6 +754,50 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     )
 
 
+async def registrar_solicitud_inversion(
+    user_id: int,
+    plan_id: str,
+    cantidad: float,
+    red_solicitada: str,
+    reinv_flag: int,
+):
+    plan = PLANES_INVERSION[plan_id]
+    wallet = WALLETS_OFICIALES[red_solicitada]
+
+    conn = sqlite3.connect("usuarios.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO inversiones (
+            user_id, plan_id, modalidad, monto, moneda, red,
+            reinversion_auto, dias_plazo, fecha_inicio, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_pago')
+        """,
+        (
+            user_id,
+            plan_id,
+            plan["modalidad"],
+            cantidad,
+            plan["moneda"],
+            red_solicitada,
+            reinv_flag,
+            plan["dias"],
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    return (
+        f"✅ **Solicitud Registrada**\n\n"
+        f"• **Plan:** {plan['nombre']}\n"
+        f"• **Monto:** `{cantidad} {plan['moneda']}`\n"
+        f"• **Red:** `{red_solicitada}`\n"
+        f"• **Reinversión Auto:** `{'SÍ' if reinv_flag else 'NO'}`\n\n"
+        f"💳 **Envía a esta dirección:**\n`{wallet}`\n\n"
+        f"📲 **Luego envía:** `/notificar [Tu_Hash]`"
+    )
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -745,9 +828,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"No se pudo notificar al patrocinador: {e}")
 
+    cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user.id,))
+    conn.commit()
     conn.close()
 
-    texto = "🌐 **Welcome / Bienvenido**\n\nPor favor, selecciona tu idioma / Please select your language:"
+    texto = "🌐 **Welcome / Bienvenido**\n\nSelecciona tu idioma / Select your language:"
     try:
         if update.message:
             await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
@@ -882,29 +967,21 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nuevo_idioma = data.split("_")[1]
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET idioma = ? WHERE user_id = ?", (nuevo_idioma, user.id))
+        cursor.execute("UPDATE usuarios SET idioma = ?, esperando_monto = 0 WHERE user_id = ?", (nuevo_idioma, user.id))
         conn.commit()
         conn.close()
 
         if nuevo_idioma == "en":
             texto = (
                 f"🛡️ **Welcome to Invest Bot (5 Networks)**\n\n"
-                f"Hello, **{user.first_name}**. Manage your investments across TRON, TON, BTC, BSC, and ETH.\n\n"
-                f"✅ **Key Rules:**\n"
-                f"• Balanced plans & terms with optional auto-reinvestment.\n"
-                f"• Early withdrawal available anytime (forfeits profits + network fee).\n"
-                f"• Blockchain-verified proofs channel.\n\n"
+                f"Hello, **{user.first_name}**. Tap **Invest** to choose a plan, amount, and network by buttons.\n\n"
                 f"👇 **Select an option:**"
             )
         else:
             texto = (
                 f"🛡️ **Bienvenido a Invierte Bot (5 Redes)**\n\n"
-                f"Hola, **{user.first_name}**. Opera en TRON, TON, BTC, BSC y ETH con reglas claras.\n\n"
-                f"✅ **Reglas Claras:**\n"
-                f"• Plazos y porcentajes moderados con reinversión automática opcional.\n"
-                f"• Retiro anticipado en cualquier momento (pierdes ganancias + comisión de red).\n"
-                f"• Comprobantes verificables en blockchain.\n\n"
-                f"👇 **Selecciona una opción del menú:**"
+                f"Hola, **{user.first_name}**. Toca **Invertir** para elegir plan, monto y red con botones.\n\n"
+                f"👇 **Selecciona una opción:**"
             )
 
         try:
@@ -975,8 +1052,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto = (
             f"🏦 **Fondo de Liquidez Global**\n\n"
             f"• **Reserva Actual:** `${fondo_actual:,.2f} USD`\n"
-            f"• **Redes Soportadas:** TRON, TON, BTC, BSC, ETH\n"
-            f"• **Liquidez / Retiro:** Retiro anticipado disponible perdiendo ganancias + comisión de red."
+            f"• **Redes:** TRON, TON, BTC, BSC, ETH\n"
+            f"• **Retiro Anticipado:** Disponible perdiendo ganancias + comisión de red."
         )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
@@ -984,9 +1061,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     elif data == "btn_planes":
-        texto = "📋 **Planes de Inversión y Redes**\n\nElige un plan para ver sus condiciones y reinversión automática, o toca una red para ver su wallet:\n\n"
+        texto = "📈 **Elige un Plan**\n\nToca el plan que prefieras para continuar:\n\n"
         for k, p in PLANES_INVERSION.items():
-            texto += f"• **{p['nombre']}** (`{p['tasa_ciclo']*100:.1f}%`) — {p['detalle']}\n"
+            texto += f"• **{p['nombre']}** (`{p['min']}–{p['max']} {p['moneda']}`): {p['detalle']}\n"
         try:
             await query.message.edit_text(texto, reply_markup=teclado_planes_y_redes(idioma), parse_mode="Markdown")
         except Exception:
@@ -1000,12 +1077,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["plan_elegido"] = plan_id
         texto = (
             f"📌 **{plan['nombre']}**\n\n"
-            f"• **Modalidad:** `{plan['modalidad']}`\n"
             f"• **Plazo:** `{plan['dias']} días` (0 = flexible)\n"
-            f"• **Rendimiento del ciclo:** `{plan['tasa_ciclo']*100:.1f}%`\n"
-            f"• **Rango:** `{plan['min']} - {plan['max']} {plan['moneda']}`\n"
-            f"• **Retiro anticipado:** En cualquier momento (pierdes ganancias + comisión de red)\n\n"
-            f"¿Deseas activar **Reinversión Automática** al completar el ciclo?"
+            f"• **Ciclo:** `{plan['tasa_ciclo']*100:.1f}%`\n"
+            f"• **Límites:** `{plan['min']} - {plan['max']} {plan['moneda']}`\n\n"
+            f"¿Quieres **Reinversión Automática** al terminar el ciclo?"
         )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_reinversion(plan_id, idioma), parse_mode="Markdown")
@@ -1019,14 +1094,68 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
         context.user_data["plan_elegido"] = plan_id
         context.user_data["reinversion_auto"] = reinv_flag
-        estado_reinv = "ACTIVADA" if reinv_flag else "DESACTIVADA"
+        estado_reinv = "SÍ" if reinv_flag else "NO"
+
         texto = (
-            f"✅ **Configuración lista para {plan['nombre']}**\n"
-            f"• **Reinversión Automática:** `{estado_reinv}`\n\n"
-            f"Usa el comando:\n`/invertir {plan_id} [Monto] [RED]`\n"
-            f"Ejemplo: `/invertir {plan_id} 20 TRON`\n"
-            f"Redes disponibles: `TRON`, `TON`, `BTC`, `BSC`, `ETH`"
+            f"💵 **Elige el Monto · {plan['nombre']}**\n"
+            f"• **Reinversión Auto:** `{estado_reinv}`\n"
+            f"• **Rango:** `{plan['min']} - {plan['max']} {plan['moneda']}`\n\n"
+            f"Toca un monto rápido o elige **Otro monto**:"
         )
+        try:
+            await query.message.edit_text(texto, reply_markup=teclado_montos_inversion(plan_id, idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data.startswith("otro_monto_"):
+        plan_id = data.replace("otro_monto_", "")
+        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+        context.user_data["plan_elegido"] = plan_id
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET esperando_monto = 1, en_soporte = 0 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+
+        texto = (
+            f"✏️ **Escribe el Monto a Invertir**\n\n"
+            f"• **Plan:** {plan['nombre']}\n"
+            f"• **Permitido:** `{plan['min']}` a `{plan['max']} {plan['moneda']}`\n\n"
+            f"Envía solo el número (ejemplo: `25`)."
+        )
+        try:
+            await query.message.edit_text(texto, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data.startswith("monto_"):
+        partes = data.split("_")
+        plan_id = partes[1]
+        monto_val = float(partes[2])
+        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+        context.user_data["plan_elegido"] = plan_id
+        context.user_data["monto_elegido"] = monto_val
+
+        texto = (
+            f"🌐 **Elige la Red de Pago**\n\n"
+            f"• **Plan:** {plan['nombre']}\n"
+            f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
+            f"Toca la red que vas a usar:"
+        )
+        try:
+            await query.message.edit_text(texto, reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
+    elif data.startswith("invred_"):
+        partes = data.split("_")
+        plan_id = partes[1]
+        monto_val = float(partes[2])
+        red_solicitada = partes[3]
+        if plan_id not in PLANES_INVERSION or red_solicitada not in WALLETS_OFICIALES:
+            return
+        reinv_flag = 1 if context.user_data.get("reinversion_auto") else 0
+        texto = await registrar_solicitud_inversion(user.id, plan_id, monto_val, red_solicitada, reinv_flag)
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception:
@@ -1068,7 +1197,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "btn_soporte":
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+        cursor.execute("UPDATE usuarios SET en_soporte = 1, esperando_monto = 0 WHERE user_id = ?", (user.id,))
         conn.commit()
         conn.close()
         texto = "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
@@ -1076,14 +1205,16 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception:
             pass
+
+
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
 
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = "📋 **Planes de Inversión:**\n\n"
+    texto = "📈 **Planes de Inversión:**\n\n"
     for k, p in PLANES_INVERSION.items():
-        texto += f"• **ID {k}: {p['nombre']}** (`{p['tasa_ciclo']*100:.1f}%`) — {p['detalle']}\n"
+        texto += f"• **{p['nombre']}** (`{p['tasa_ciclo']*100:.1f}%`) — {p['detalle']}\n"
     await update.message.reply_text(texto, reply_markup=teclado_planes_y_redes("es"), parse_mode="Markdown")
 
 
@@ -1247,7 +1378,8 @@ async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.message.reply_text(
-            "⚠️ Uso: `/invertir [ID_Plan] [Cantidad] [RED_OPCIONAL]`\nEjemplo: `/invertir 2 15 TON`",
+            "💡 También puedes invertir por botones tocando **Invertir** en el menú.\n"
+            "Comando rápido: `/invertir [ID_Plan] [Cantidad] [RED_OPCIONAL]`",
             parse_mode="Markdown",
         )
         return
@@ -1269,50 +1401,16 @@ async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Red inválida. Usa: `TRON`, `TON`, `BTC`, `BSC` o `ETH`.", parse_mode="Markdown")
         return
 
-    wallet = WALLETS_OFICIALES[red_solicitada]
     reinv_flag = 1 if context.user_data.get("reinversion_auto") else 0
-
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO inversiones (
-            user_id, plan_id, modalidad, monto, moneda, red,
-            reinversion_auto, dias_plazo, fecha_inicio, estado
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_pago')
-        """,
-        (
-            update.effective_user.id,
-            plan_id,
-            plan["modalidad"],
-            cantidad,
-            plan["moneda"],
-            red_solicitada,
-            reinv_flag,
-            plan["dias"],
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    await update.message.reply_text(
-        f"✅ **Solicitud de Inversión Registrada**\n"
-        f"• Plan: **{plan['nombre']}**\n"
-        f"• Monto: `{cantidad} {plan['moneda']}`\n"
-        f"• Red: `{red_solicitada}`\n"
-        f"• Reinversión Automática: `{'SÍ' if reinv_flag else 'NO'}`\n\n"
-        f"💳 Transfiere a:\n`{wallet}`\n\n"
-        f"📲 Tras enviar, reporta con: `/notificar [Tu_Hash]`",
-        parse_mode="Markdown",
-    )
+    texto = await registrar_solicitud_inversion(update.effective_user.id, plan_id, cantidad, red_solicitada, reinv_flag)
+    await update.message.reply_text(texto, parse_mode="Markdown")
 
 
 async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     conn = sqlite3.connect("usuarios.db")
     cursor = conn.cursor()
-    cursor.execute("UPDATE usuarios SET en_soporte = 1 WHERE user_id = ?", (user.id,))
+    cursor.execute("UPDATE usuarios SET en_soporte = 1, esperando_monto = 0 WHERE user_id = ?", (user.id,))
     conn.commit()
     conn.close()
     await update.message.reply_text("🎧 **Centro de Soporte Oficial**\n\nEscribe tu duda o problema a continuación:", parse_mode="Markdown")
@@ -1339,17 +1437,56 @@ async def responder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    texto = update.message.text
+    texto = (update.message.text or "").strip()
     if user.id == ADMIN_ID:
         return
 
     conn = sqlite3.connect("usuarios.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT en_soporte FROM usuarios WHERE user_id = ?", (user.id,))
+    cursor.execute("SELECT en_soporte, esperando_monto, idioma FROM usuarios WHERE user_id = ?", (user.id,))
     row = cursor.fetchone()
     conn.close()
 
-    if row and row[0] == 1:
+    en_soporte = row[0] if row else 0
+    esperando_monto = row[1] if row and len(row) > 1 else 0
+    idioma = row[2] if row and len(row) > 2 and row[2] else "es"
+
+    if esperando_monto == 1:
+        plan_id = context.user_data.get("plan_elegido", "1")
+        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+        try:
+            monto_val = float(texto.replace(",", "."))
+        except ValueError:
+            await update.message.reply_text(
+                f"❌ Escribe solo un número entre `{plan['min']}` y `{plan['max']}`.",
+                parse_mode="Markdown",
+            )
+            return
+
+        if not (plan["min"] <= monto_val <= plan["max"]):
+            await update.message.reply_text(
+                f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
+                parse_mode="Markdown",
+            )
+            return
+
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user.id,))
+        conn.commit()
+        conn.close()
+
+        context.user_data["monto_elegido"] = monto_val
+        await update.message.reply_text(
+            f"🌐 **Elige la Red de Pago**\n\n"
+            f"• **Plan:** {plan['nombre']}\n"
+            f"• **Monto:** `{monto_val} {plan['moneda']}`",
+            reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
+            parse_mode="Markdown",
+        )
+        return
+
+    if en_soporte == 1:
         await update.message.reply_text("📩 **Mensaje recibido.** En breve será atendido por un asesor.", parse_mode="Markdown")
         try:
             await context.bot.send_message(
