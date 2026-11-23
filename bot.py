@@ -182,88 +182,85 @@ PLANES_INVERSION = {
 # --- BASE DE DATOS SQLITE ---
 def inicializar_db():
     try:
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                user_id INTEGER PRIMARY KEY,
-                nombre TEXT,
-                patrocinador_id INTEGER,
-                deposito_activo REAL DEFAULT 0,
-                moneda_deposito TEXT DEFAULT 'USDT',
-                red_deposito TEXT DEFAULT 'TRON',
-                fecha_deposito TEXT,
-                ganancias_referidos REAL DEFAULT 0,
-                en_soporte INTEGER DEFAULT 0,
-                esperando_monto INTEGER DEFAULT 0,
-                esperando_hash INTEGER DEFAULT 0,
-                idioma TEXT DEFAULT 'es'
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS liquidez_global (
-                id INTEGER PRIMARY KEY,
-                fondo_actual REAL,
-                ultima_actualizacion TEXT
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS inversiones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                plan_id TEXT,
-                modalidad TEXT,
-                monto REAL,
-                moneda TEXT,
-                red TEXT,
-                reinversion_auto INTEGER DEFAULT 0,
-                dias_plazo INTEGER DEFAULT 0,
-                fecha_inicio TEXT,
-                estado TEXT DEFAULT 'activa'
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS comprobantes_verificados (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tx_hash TEXT UNIQUE,
-                red TEXT,
-                moneda TEXT,
-                monto REAL,
-                tipo TEXT,
-                fecha TEXT
-            )
-        """)
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    user_id INTEGER PRIMARY KEY,
+                    nombre TEXT,
+                    patrocinador_id INTEGER,
+                    deposito_activo REAL DEFAULT 0,
+                    moneda_deposito TEXT DEFAULT 'USDT',
+                    red_deposito TEXT DEFAULT 'TRON',
+                    fecha_deposito TEXT,
+                    ganancias_referidos REAL DEFAULT 0,
+                    en_soporte INTEGER DEFAULT 0,
+                    esperando_monto INTEGER DEFAULT 0,
+                    esperando_hash INTEGER DEFAULT 0,
+                    idioma TEXT DEFAULT 'es'
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS liquidez_global (
+                    id INTEGER PRIMARY KEY,
+                    fondo_actual REAL,
+                    ultima_actualizacion TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inversiones (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    plan_id TEXT,
+                    modalidad TEXT,
+                    monto REAL,
+                    moneda TEXT,
+                    red TEXT,
+                    reinversion_auto INTEGER DEFAULT 0,
+                    dias_plazo INTEGER DEFAULT 0,
+                    fecha_inicio TEXT,
+                    estado TEXT DEFAULT 'activa'
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS comprobantes_verificados (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tx_hash TEXT UNIQUE,
+                    red TEXT,
+                    moneda TEXT,
+                    monto REAL,
+                    tipo TEXT,
+                    fecha TEXT
+                )
+            """)
 
-        cursor.execute("PRAGMA table_info(usuarios)")
-        columnas = [col[1] for col in cursor.fetchall()]
-        if "red_deposito" not in columnas:
-            cursor.execute("ALTER TABLE usuarios ADD COLUMN red_deposito TEXT DEFAULT 'TRON'")
-        if "esperando_monto" not in columnas:
-            cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_monto INTEGER DEFAULT 0")
-        if "esperando_hash" not in columnas:
-            cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_hash INTEGER DEFAULT 0")
+            cursor.execute("PRAGMA table_info(usuarios)")
+            columnas = [col[1] for col in cursor.fetchall()]
+            if "red_deposito" not in columnas:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN red_deposito TEXT DEFAULT 'TRON'")
+            if "esperando_monto" not in columnas:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_monto INTEGER DEFAULT 0")
+            if "esperando_hash" not in columnas:
+                cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_hash INTEGER DEFAULT 0")
 
-        cursor.execute("SELECT COUNT(*) FROM liquidez_global")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute(
-                "INSERT INTO liquidez_global (id, fondo_actual, ultima_actualizacion) VALUES (1, ?, ?)",
-                (124500.00, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            )
+            cursor.execute("SELECT COUNT(*) FROM liquidez_global")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute(
+                    "INSERT INTO liquidez_global (id, fondo_actual, ultima_actualizacion) VALUES (1, ?, ?)",
+                    (124500.00, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                )
 
-        fecha_respaldo = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for h_ton in HASHES_RESPALDO_TON:
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (h_ton, "TON", "TON", 10.0, "respaldo_ton", fecha_respaldo),
-            )
-        for h_tron in HASHES_RESPALDO_TRON:
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (h_tron, "TRON", "USDT", 25.0, "respaldo_tron", fecha_respaldo),
-            )
-
-        conn.commit()
-        conn.close()
+            fecha_respaldo = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for h_ton in HASHES_RESPALDO_TON:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                    (h_ton, "TON", "TON", 10.0, "respaldo_ton", fecha_respaldo),
+                )
+            for h_tron in HASHES_RESPALDO_TRON:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                    (h_tron, "TRON", "USDT", 25.0, "respaldo_tron", fecha_respaldo),
+                )
     except Exception as e:
         print(f"Error inicializando BD: {e}")
 
@@ -301,15 +298,13 @@ def _hash_ya_publicado(tx_hash: str) -> bool:
     if tx_hash in HASHES_USADOS_SESION:
         return True
     try:
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM comprobantes_verificados WHERE tx_hash = ? AND tipo = 'publicado_canal' LIMIT 1",
-            (tx_hash,),
-        )
-        existe = cursor.fetchone() is not None
-        conn.close()
-        return existe
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM comprobantes_verificados WHERE tx_hash = ? AND tipo = 'publicado_canal' LIMIT 1",
+                (tx_hash,),
+            )
+            return cursor.fetchone() is not None
     except Exception:
         return False
 
@@ -317,14 +312,12 @@ def _hash_ya_publicado(tx_hash: str) -> bool:
 def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float):
     _marcar_hash_usado(tx_hash)
     try:
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-            (tx_hash, red, moneda, monto, "publicado_canal", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (tx_hash, red, moneda, monto, "publicado_canal", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
     except Exception as e:
         print(f"Error guardando hash publicado: {e}")
 
@@ -387,7 +380,7 @@ async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo
                 if vout.get("scriptpubkey_address") == address
             )
             if monto_sats == 0 and tx.get("vout"):
-                monto_sats = sum(int(v.get("value", 0)) for v in tx.get("vout"))
+                monto_sats = sum(int(vout.get("value", 0)) for vout in (tx.get("vout") or []))
             monto_btc = round(monto_sats / 1e8, 6)
             if not _cumple_filtro_monto(monto_btc, tipo_operacion) or _hash_ya_publicado(txid):
                 continue
@@ -599,6 +592,7 @@ async def tarea_comprobaciones_canal(bot):
 
         await asyncio.sleep(3600)
 
+
 # --- TECLADOS INLINE CORTOS Y CLAROS ---
 def obtener_menu_idiomas():
     return InlineKeyboardMarkup([
@@ -800,33 +794,31 @@ async def registrar_solicitud_inversion(
     plan = PLANES_INVERSION[plan_id]
     wallet = WALLETS_OFICIALES[red_solicitada]
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO inversiones (
-            user_id, plan_id, modalidad, monto, moneda, red,
-            reinversion_auto, dias_plazo, fecha_inicio, estado
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_pago')
-        """,
-        (
-            user_id,
-            plan_id,
-            plan["modalidad"],
-            cantidad,
-            plan["moneda"],
-            red_solicitada,
-            reinv_flag,
-            plan["dias"],
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ),
-    )
-    cursor.execute(
-        "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-        (user_id,),
-    )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO inversiones (
+                user_id, plan_id, modalidad, monto, moneda, red,
+                reinversion_auto, dias_plazo, fecha_inicio, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_pago')
+            """,
+            (
+                user_id,
+                plan_id,
+                plan["modalidad"],
+                cantidad,
+                plan["moneda"],
+                red_solicitada,
+                reinv_flag,
+                plan["dias"],
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        cursor.execute(
+            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+            (user_id,),
+        )
 
     return (
         f"✅ **Solicitud Registrada**\n\n"
@@ -842,44 +834,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     patrocinador_id = int(args[0]) if args and args[0].isdigit() else None
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id, patrocinador_id FROM usuarios WHERE user_id = ?", (user.id,))
-    existe = cursor.fetchone()
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, patrocinador_id FROM usuarios WHERE user_id = ?", (user.id,))
+        existe = cursor.fetchone()
 
-    if not existe:
+        if not existe:
+            cursor.execute(
+                "INSERT INTO usuarios (user_id, nombre, patrocinador_id, idioma) VALUES (?, ?, ?, ?)",
+                (user.id, user.first_name, patrocinador_id, "es"),
+            )
+
+            if patrocinador_id and patrocinador_id != user.id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=patrocinador_id,
+                        text=(
+                            f"🎉 **¡Nuevo Referido Detectado!**\n\n"
+                            f"El usuario **{user.first_name}** se unió a tu red de referidos."
+                        ),
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    print(f"No se pudo notificar al patrocinador: {e}")
+
         cursor.execute(
-            "INSERT INTO usuarios (user_id, nombre, patrocinador_id, idioma) VALUES (?, ?, ?, ?)",
-            (user.id, user.first_name, patrocinador_id, "es"),
+            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+            (user.id,),
         )
-        conn.commit()
-
-        if patrocinador_id and patrocinador_id != user.id:
-            try:
-                await context.bot.send_message(
-                    chat_id=patrocinador_id,
-                    text=(
-                        f"🎉 **¡Nuevo Referido Detectado!**\n\n"
-                        f"El usuario **{user.first_name}** se unió a tu red de referidos."
-                    ),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                print(f"No se pudo notificar al patrocinador: {e}")
-
-    cursor.execute(
-        "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-        (user.id,),
-    )
-    conn.commit()
-    conn.close()
 
     texto = "🌐 **Welcome / Bienvenido**\n\nSelecciona tu idioma / Select your language:"
     try:
         if update.message:
             await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
         elif update.callback_query:
-            await update.callback_query.answer()
+            try:
+                await update.callback_query.answer()
+            except Exception:
+                pass
             await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
     except Exception as e:
         print(f"Error en start: {e}")
@@ -890,113 +882,115 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
     data = query.data
     user_id = query.from_user.id
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT deposito_activo, moneda_deposito, red_deposito FROM usuarios WHERE user_id = ?",
-        (user_id,),
-    )
-    row = cursor.fetchone()
-    deposito_activo = float(row[0]) if row and row[0] else 0.0
-    moneda = row[1] if row and row[1] else "USDT"
-    red = row[2] if row and row[2] else "TRON"
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT deposito_activo, moneda_deposito, red_deposito FROM usuarios WHERE user_id = ?",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        deposito_activo = float(row[0]) if row and row[0] else 0.0
+        moneda = row[1] if row and row[1] else "USDT"
+        red = row[2] if row and row[2] else "TRON"
 
-    if data == "btn_retirar":
-        conn.close()
-        if deposito_activo <= 0:
-            texto = (
-                "🏦 **Retiros:** No tienes capital activo disponible para retirar."
+        if data == "btn_retirar":
+            if deposito_activo <= 0:
+                texto = (
+                    "🏦 **Retiros:** No tienes capital activo disponible para retirar."
+                    if idioma == "es"
+                    else "🏦 **Withdrawals:** You have no active capital available to withdraw."
+                )
+                await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+                return
+
+            calc = calcular_retiro_anticipado(deposito_activo, moneda)
+            if idioma == "en":
+                texto = (
+                    f"⚠️ **Early Withdrawal Notice**\n\n"
+                    f"You can withdraw anytime, **but you forfeit accrued profits** and a network fee applies.\n\n"
+                    f"• **Base Capital:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
+                    f"• **Accrued Profits:** `Forfeited (0)`\n"
+                    f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                    f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`"
+                )
+            else:
+                texto = (
+                    f"⚠️ **Aviso de Retiro Anticipado**\n\n"
+                    f"Puedes retirar en cualquier momento, **pero pierdes las ganancias acumuladas** y se descuenta comisión de red.\n\n"
+                    f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
+                    f"• **Ganancias:** `Se pierden al retirar antes (0)`\n"
+                    f"• **Comisión de Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                    f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`"
+                )
+            await query.message.edit_text(texto, reply_markup=teclado_confirmar_retiro_anticipado(idioma), parse_mode="Markdown")
+            return
+
+        if data == "confirm_retiro_anticipado":
+            calc = calcular_retiro_anticipado(deposito_activo, moneda)
+            if calc["capital_base"] <= 0:
+                await query.message.edit_text("⚠️ Sin saldo activo.", reply_markup=obtener_menu_principal(idioma))
+                return
+
+            cursor.execute(
+                "UPDATE usuarios SET deposito_activo = 0, fecha_deposito = NULL WHERE user_id = ?",
+                (user_id,),
+            )
+            cursor.execute(
+                "UPDATE inversiones SET estado = 'retirado_anticipado' WHERE user_id = ? AND estado = 'activa'",
+                (user_id,),
+            )
+
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"💸 **Retiro Anticipado Solicitado**\n\n"
+                        f"• **Usuario ID:** `{user_id}`\n"
+                        f"• **Red:** `{red}`\n"
+                        f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}`\n"
+                        f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                        f"• **Neto a Enviar:** `{calc['neto_a_recibir']} {calc['moneda']}`"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                print(f"Error notificando retiro al admin: {e}")
+
+            texto_ok = (
+                f"✅ **Retiro Anticipado Registrado**\n\n"
+                f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
+                f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                f"• **Ganancias:** `Anuladas por retiro anticipado`"
                 if idioma == "es"
-                else "🏦 **Withdrawals:** You have no active capital available to withdraw."
+                else (
+                    f"✅ **Early Withdrawal Recorded**\n\n"
+                    f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
+                    f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                    f"• **Profits:** `Forfeited due to early withdrawal`"
+                )
             )
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+            await query.message.edit_text(texto_ok, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
             return
 
-        calc = calcular_retiro_anticipado(deposito_activo, moneda)
-        if idioma == "en":
-            texto = (
-                f"⚠️ **Early Withdrawal Notice**\n\n"
-                f"You can withdraw anytime, **but you forfeit accrued profits** and a network fee applies.\n\n"
-                f"• **Base Capital:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
-                f"• **Accrued Profits:** `Forfeited (0)`\n"
-                f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`"
+        if data == "cancel_retiro_anticipado":
+            texto_cancel = (
+                "👍 **Retiro cancelado.** Tu inversión sigue activa."
+                if idioma == "es"
+                else "👍 **Withdrawal cancelled.** Your investment remains active."
             )
-        else:
-            texto = (
-                f"⚠️ **Aviso de Retiro Anticipado**\n\n"
-                f"Puedes retirar en cualquier momento, **pero pierdes las ganancias acumuladas** y se descuenta comisión de red.\n\n"
-                f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
-                f"• **Ganancias:** `Se pierden al retirar antes (0)`\n"
-                f"• **Comisión de Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`"
-            )
-        await query.message.edit_text(texto, reply_markup=teclado_confirmar_retiro_anticipado(idioma), parse_mode="Markdown")
-        return
-
-    if data == "confirm_retiro_anticipado":
-        calc = calcular_retiro_anticipado(deposito_activo, moneda)
-        if calc["capital_base"] <= 0:
-            conn.close()
-            await query.message.edit_text("⚠️ Sin saldo activo.", reply_markup=obtener_menu_principal(idioma))
-            return
-
-        cursor.execute(
-            "UPDATE usuarios SET deposito_activo = 0, fecha_deposito = NULL WHERE user_id = ?",
-            (user_id,),
-        )
-        cursor.execute(
-            "UPDATE inversiones SET estado = 'retirado_anticipado' WHERE user_id = ? AND estado = 'activa'",
-            (user_id,),
-        )
-        conn.commit()
-        conn.close()
-
-        try:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    f"💸 **Retiro Anticipado Solicitado**\n\n"
-                    f"• **Usuario ID:** `{user_id}`\n"
-                    f"• **Red:** `{red}`\n"
-                    f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}`\n"
-                    f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                    f"• **Neto a Enviar:** `{calc['neto_a_recibir']} {calc['moneda']}`"
-                ),
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            print(f"Error notificando retiro al admin: {e}")
-
-        texto_ok = (
-            f"✅ **Retiro Anticipado Registrado**\n\n"
-            f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
-            f"• **Comisión Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-            f"• **Ganancias:** `Anuladas por retiro anticipado`"
-            if idioma == "es"
-            else (
-                f"✅ **Early Withdrawal Recorded**\n\n"
-                f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`\n"
-                f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                f"• **Profits:** `Forfeited due to early withdrawal`"
-            )
-        )
-        await query.message.edit_text(texto_ok, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        return
-
-    if data == "cancel_retiro_anticipado":
-        conn.close()
-        texto_cancel = (
-            "👍 **Retiro cancelado.** Tu inversión sigue activa."
-            if idioma == "es"
-            else "👍 **Withdrawal cancelled.** Your investment remains active."
-        )
-        await query.message.edit_text(texto_cancel, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+            await query.message.edit_text(texto_cancel, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
 
 
 async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    if not query:
+        return
+
+    print(f"Callback recibido: {query.data} de user={query.from_user.id}")
+    try:
+        await query.answer()
+    except Exception as e:
+        print(f"Error en query.answer(): {e}")
 
     data = query.data
     user = query.from_user
@@ -1007,14 +1001,16 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("lang_"):
         nuevo_idioma = data.split("_")[1]
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE usuarios SET idioma = ?, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-            (nuevo_idioma, user.id),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO usuarios (user_id, nombre, idioma) VALUES (?, ?, ?)",
+                (user.id, user.first_name, nuevo_idioma),
+            )
+            cursor.execute(
+                "UPDATE usuarios SET idioma = ?, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+                (nuevo_idioma, user.id),
+            )
 
         if nuevo_idioma == "en":
             texto = (
@@ -1035,26 +1031,24 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error al editar idioma: {e}")
         return
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
-    row = cursor.fetchone()
-    conn.close()
-    idioma = row[0] if row else "es"
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
+        row = cursor.fetchone()
+    idioma = row[0] if row and row[0] else "es"
 
     if data in ("btn_retirar", "confirm_retiro_anticipado", "cancel_retiro_anticipado"):
         await procesar_retiro_anticipado(update, context, idioma)
         return
 
     if data == "btn_saldo":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT deposito_activo, moneda_deposito, red_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?",
-            (user.id,),
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT deposito_activo, moneda_deposito, red_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?",
+                (user.id,),
+            )
+            row = cursor.fetchone()
 
         if not row or not row[0] or float(row[0]) == 0:
             texto = (
@@ -1083,15 +1077,14 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_saldo: {e}")
 
     elif data == "btn_liquidez":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+            row = cursor.fetchone()
         fondo_actual = row[0] if row else 124500.00
 
         texto = (
@@ -1102,8 +1095,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_liquidez: {e}")
 
     elif data == "btn_planes":
         bloques_planes = []
@@ -1124,8 +1117,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_planes_y_redes(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_planes: {e}")
 
     elif data.startswith("sel_plan_"):
         plan_id = data.replace("sel_plan_", "")
@@ -1142,8 +1135,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_reinversion(plan_id, idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en sel_plan: {e}")
 
     elif data.startswith("reinv_"):
         partes = data.split("_")
@@ -1162,21 +1155,19 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_montos_inversion(plan_id, idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en reinv: {e}")
 
     elif data.startswith("otro_monto_"):
         plan_id = data.replace("otro_monto_", "")
         plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
         context.user_data["plan_elegido"] = plan_id
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE usuarios SET esperando_monto = 1, en_soporte = 0, esperando_hash = 0 WHERE user_id = ?",
-            (user.id,),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE usuarios SET esperando_monto = 1, en_soporte = 0, esperando_hash = 0 WHERE user_id = ?",
+                (user.id,),
+            )
 
         texto = (
             f"✏️ **Escribe el Monto a Invertir**\n\n"
@@ -1186,8 +1177,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en otro_monto: {e}")
 
     elif data.startswith("monto_"):
         partes = data.split("_")
@@ -1205,8 +1196,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en monto: {e}")
 
     elif data.startswith("invred_"):
         partes = data.split("_")
@@ -1219,8 +1210,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto = await registrar_solicitud_inversion(user.id, plan_id, monto_val, red_solicitada, reinv_flag)
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en invred: {e}")
 
     elif data.startswith("red_"):
         red_key = data.replace("red_", "")
@@ -1235,8 +1226,8 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             try:
                 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error en red: {e}")
 
     elif data == "btn_depositar":
         try:
@@ -1245,25 +1236,23 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=obtener_menu_principal(idioma),
                 parse_mode="Markdown",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_depositar: {e}")
 
     elif data == "btn_referidos":
         texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_referidos: {e}")
 
     elif data == "btn_reportar_hash":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE usuarios SET esperando_hash = 1, en_soporte = 0, esperando_monto = 0 WHERE user_id = ?",
-            (user.id,),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE usuarios SET esperando_hash = 1, en_soporte = 0, esperando_monto = 0 WHERE user_id = ?",
+                (user.id,),
+            )
 
         texto = (
             "📲 **Reportar Hash de Pago**\n\n"
@@ -1276,23 +1265,21 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_reportar_hash: {e}")
 
     elif data == "btn_soporte":
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE usuarios SET en_soporte = 1, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-            (user.id,),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE usuarios SET en_soporte = 1, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+                (user.id,),
+            )
         texto = "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error en btn_soporte: {e}")
 
 
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1329,14 +1316,12 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     hash_tx = " ".join(context.args).strip()
     try:
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-            (hash_tx, "TRON", "USDT", 0.0, "reporte_usuario", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect("usuarios.db", timeout=15) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (hash_tx, "TRON", "USDT", 0.0, "reporte_usuario", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
     except Exception:
         pass
     await update.message.reply_text(
@@ -1373,62 +1358,58 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tx_hash = context.args[4].strip() if len(context.args) >= 5 else None
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
 
-    cursor.execute(
-        "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
-        (monto, moneda, red, fecha_actual, id_usuario),
-    )
-    cursor.execute(
-        """
-        INSERT INTO inversiones (
-            user_id, plan_id, modalidad, monto, moneda, red,
-            reinversion_auto, dias_plazo, fecha_inicio, estado
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
-        """,
-        (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
-    )
-
-    if tx_hash:
         cursor.execute(
-            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-            (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
+            "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
+            (monto, moneda, red, fecha_actual, id_usuario),
+        )
+        cursor.execute(
+            """
+            INSERT INTO inversiones (
+                user_id, plan_id, modalidad, monto, moneda, red,
+                reinversion_auto, dias_plazo, fecha_inicio, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+            """,
+            (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
         )
 
-    porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
-    patrocinador_actual = id_usuario
-
-    for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
-        cursor.execute(
-            "SELECT patrocinador_id FROM usuarios WHERE user_id = ?",
-            (patrocinador_actual,),
-        )
-        resultado = cursor.fetchone()
-        if not resultado or not resultado[0]:
-            break
-        patrocinador_id = resultado[0]
-        comision = monto * porcentaje
-        cursor.execute(
-            "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
-            (comision, patrocinador_id),
-        )
-        conn.commit()
-        try:
-            await context.bot.send_message(
-                chat_id=patrocinador_id,
-                text=(
-                    f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
-                    f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%)."
-                ),
-                parse_mode="Markdown",
+        if tx_hash:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
             )
-        except Exception as e:
-            print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
-        patrocinador_actual = patrocinador_id
 
-    conn.commit()
-    conn.close()
+        porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
+        patrocinador_actual = id_usuario
+
+        for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+            cursor.execute(
+                "SELECT patrocinador_id FROM usuarios WHERE user_id = ?",
+                (patrocinador_actual,),
+            )
+            resultado = cursor.fetchone()
+            if not resultado or not resultado[0]:
+                break
+            patrocinador_id = resultado[0]
+            comision = monto * porcentaje
+            cursor.execute(
+                "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+                (comision, patrocinador_id),
+            )
+            try:
+                await context.bot.send_message(
+                    chat_id=patrocinador_id,
+                    text=(
+                        f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                        f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%)."
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
+            patrocinador_actual = patrocinador_id
 
     await update.message.reply_text(
         f"✅ Depósito aprobado para `{id_usuario}`: `{monto} {moneda}` en `{red}`.",
@@ -1443,124 +1424,114 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     texto_msg = update.message.text.strip()
 
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
-        (user.id,),
-    )
-    row = cursor.fetchone()
+    with sqlite3.connect("usuarios.db", timeout=15) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
+            (user.id,),
+        )
+        row = cursor.fetchone()
 
-    if not row:
-        conn.close()
-        return
+        if not row:
+            return
 
-    esperando_monto, esperando_hash, en_soporte, idioma = row
-    idioma = idioma or "es"
+        esperando_monto, esperando_hash, en_soporte, idioma = row
+        idioma = idioma or "es"
 
-    if esperando_monto:
-        plan_id = context.user_data.get("plan_elegido", "1")
-        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
-        try:
-            monto_val = float(texto_msg.replace(",", "."))
-        except ValueError:
-            conn.close()
+        if esperando_monto:
+            plan_id = context.user_data.get("plan_elegido", "1")
+            plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+            try:
+                monto_val = float(texto_msg.replace(",", "."))
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Envía un número válido (ejemplo: `25`).",
+                    parse_mode="Markdown",
+                )
+                return
+
+            if monto_val < plan["min"] or monto_val > plan["max"]:
+                await update.message.reply_text(
+                    f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
+                    parse_mode="Markdown",
+                )
+                return
+
+            context.user_data["monto_elegido"] = monto_val
             await update.message.reply_text(
-                "❌ Envía un número válido (ejemplo: `25`).",
+                f"🌐 **Elige la Red de Pago**\n\n"
+                f"• **Plan:** {plan['nombre']}\n"
+                f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
+                f"Toca la red que vas a usar:",
+                reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
                 parse_mode="Markdown",
             )
             return
 
-        if monto_val < plan["min"] or monto_val > plan["max"]:
-            conn.close()
+        if esperando_hash:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    texto_msg,
+                    "TRON",
+                    "USDT",
+                    0.0,
+                    "reporte_usuario",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            cursor.execute(
+                "UPDATE usuarios SET esperando_hash = 0 WHERE user_id = ?",
+                (user.id,),
+            )
+
+            if ADMIN_ID:
+                try:
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=(
+                            f"📲 **Nuevo Hash Reportado**\n\n"
+                            f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                            f"• **Hash:** `{texto_msg}`"
+                        ),
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    print(f"Error notificando hash al admin: {e}")
+
             await update.message.reply_text(
-                f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
+                f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
+                reply_markup=obtener_menu_principal(idioma),
                 parse_mode="Markdown",
             )
             return
 
-        conn.close()
-        context.user_data["monto_elegido"] = monto_val
-        await update.message.reply_text(
-            f"🌐 **Elige la Red de Pago**\n\n"
-            f"• **Plan:** {plan['nombre']}\n"
-            f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
-            f"Toca la red que vas a usar:",
-            reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
-            parse_mode="Markdown",
-        )
-        return
+        if en_soporte:
+            cursor.execute(
+                "UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?",
+                (user.id,),
+            )
 
-    if esperando_hash:
-        cursor.execute(
-            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                texto_msg,
-                "TRON",
-                "USDT",
-                0.0,
-                "reporte_usuario",
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
-        cursor.execute(
-            "UPDATE usuarios SET esperando_hash = 0 WHERE user_id = ?",
-            (user.id,),
-        )
-        conn.commit()
-        conn.close()
+            if ADMIN_ID:
+                try:
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=(
+                            f"🎧 **Mensaje de Soporte**\n\n"
+                            f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
+                            f"• **Mensaje:** {texto_msg}"
+                        ),
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    print(f"Error enviando soporte al admin: {e}")
 
-        if ADMIN_ID:
-            try:
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        f"📲 **Nuevo Hash Reportado**\n\n"
-                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
-                        f"• **Hash:** `{texto_msg}`"
-                    ),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                print(f"Error notificando hash al admin: {e}")
-
-        await update.message.reply_text(
-            f"⏳ Comprobante recibido (`{texto_msg}`). En proceso de verificación.",
-            reply_markup=obtener_menu_principal(idioma),
-            parse_mode="Markdown",
-        )
-        return
-
-    if en_soporte:
-        cursor.execute(
-            "UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?",
-            (user.id,),
-        )
-        conn.commit()
-        conn.close()
-
-        if ADMIN_ID:
-            try:
-                await context.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text=(
-                        f"🎧 **Mensaje de Soporte**\n\n"
-                        f"• **Usuario:** {user.first_name} (`{user.id}`)\n"
-                        f"• **Mensaje:** {texto_msg}"
-                    ),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                print(f"Error enviando soporte al admin: {e}")
-
-        await update.message.reply_text(
-            "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
-            reply_markup=obtener_menu_principal(idioma),
-            parse_mode="Markdown",
-        )
-        return
-
-    
+            await update.message.reply_text(
+                "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
+                reply_markup=obtener_menu_principal(idioma),
+                parse_mode="Markdown",
+            )
+            return
 
 
 async def post_init(application):
@@ -1571,13 +1542,9 @@ def main():
     if not TOKEN:
         raise RuntimeError("Falta la variable de entorno TOKEN en Render.")
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     Thread(target=run_web, daemon=True).start()
 
     application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
-
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
@@ -1588,6 +1555,7 @@ def main():
     application.add_handler(CallbackQueryHandler(boton_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
 
+    print("Iniciando polling de Telegram...")
     application.run_polling(drop_pending_updates=True)
 
 
