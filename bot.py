@@ -1345,26 +1345,26 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
         (monto, moneda, red, fecha_actual, id_usuario),
     )
-    cursor.execute(
-        """
-        INSERT INTO inversiones (
-            user_id, plan_id, modalidad, monto, moneda, red,
-            reinversion_auto, dias_plazo, fecha_inicio, estado
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
-        """,
-        (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
-    )
-
-    if tx_hash:
-        cursor.execute(
-            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-            (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
+            cursor.execute(
+            """
+            INSERT INTO inversiones (
+                user_id, plan_id, modalidad, monto, moneda, red,
+                reinversion_auto, dias_plazo, fecha_inicio, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+            """,
+            (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
         )
 
-    porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
-    patrocinador_actual = id_usuario
+        if tx_hash:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
+            )
 
-            for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+        porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
+        patrocinador_actual = id_usuario
+
+        for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
             cursor.execute("SELECT patrocinador_id FROM usuarios WHERE user_id = ?", (patrocinador_actual,))
             resultado = cursor.fetchone()
             if not resultado or not resultado[0]:
