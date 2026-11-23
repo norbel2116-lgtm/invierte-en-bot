@@ -1540,9 +1540,13 @@ def main():
     if not TOKEN:
         raise RuntimeError("Falta la variable de entorno TOKEN en Render.")
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     Thread(target=run_web, daemon=True).start()
 
     application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
