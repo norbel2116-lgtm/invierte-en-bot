@@ -1325,6 +1325,9 @@ def main():
         print("ERROR: Falta la variable de entorno TOKEN.")
         return
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     t = Thread(target=run_web, daemon=True)
     t.start()
 
