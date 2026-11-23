@@ -1551,7 +1551,19 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    asyncio.create_task(tarea_comprobaciones_canal(application.bot))
+    application.bot_data["tarea_comprobaciones"] = asyncio.create_task(
+        tarea_comprobaciones_canal(application.bot)
+    )
+
+
+async def post_shutdown(application):
+    tarea = application.bot_data.get("tarea_comprobaciones")
+    if tarea and not tarea.done():
+        tarea.cancel()
+        try:
+            await tarea
+        except asyncio.CancelledError:
+            pass
 
 
 def main():
@@ -1561,9 +1573,14 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    Thread(target=run_web, daemon=True).start()
+    application = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .post_init(post_init)
+    .post_shutdown(post_shutdown)
+    .build()
+)
 
-    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
