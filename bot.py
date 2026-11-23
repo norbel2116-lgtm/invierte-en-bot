@@ -196,6 +196,7 @@ def inicializar_db():
                 ganancias_referidos REAL DEFAULT 0,
                 en_soporte INTEGER DEFAULT 0,
                 esperando_monto INTEGER DEFAULT 0,
+                esperando_hash INTEGER DEFAULT 0,
                 idioma TEXT DEFAULT 'es'
             )
         """)
@@ -239,6 +240,8 @@ def inicializar_db():
             cursor.execute("ALTER TABLE usuarios ADD COLUMN red_deposito TEXT DEFAULT 'TRON'")
         if "esperando_monto" not in columnas:
             cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_monto INTEGER DEFAULT 0")
+        if "esperando_hash" not in columnas:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN esperando_hash INTEGER DEFAULT 0")
 
         cursor.execute("SELECT COUNT(*) FROM liquidez_global")
         if cursor.fetchone()[0] == 0:
@@ -591,10 +594,11 @@ def obtener_menu_principal(idioma="es"):
                 InlineKeyboardButton("💸 Withdraw", callback_data="btn_retirar"),
             ],
             [
+                InlineKeyboardButton("📲 Report Hash", callback_data="btn_reportar_hash"),
                 InlineKeyboardButton("🎧 Support", callback_data="btn_soporte"),
-                InlineKeyboardButton("📢 Proofs", url=LINK_CANAL),
             ],
             [
+                InlineKeyboardButton("📢 Proofs", url=LINK_CANAL),
                 InlineKeyboardButton("🌐 Language", callback_data="btn_cambiar_idioma"),
             ],
         ])
@@ -613,10 +617,11 @@ def obtener_menu_principal(idioma="es"):
             InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
         ],
         [
+            InlineKeyboardButton("📲 Reportar Hash", callback_data="btn_reportar_hash"),
             InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
-            InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
         ],
         [
+            InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
             InlineKeyboardButton("🌐 Idioma", callback_data="btn_cambiar_idioma"),
         ],
     ])
@@ -696,7 +701,7 @@ def teclado_redes_inversion(plan_id: str, monto: float, idioma="es"):
         [
             InlineKeyboardButton(
                 "⬅️ Montos" if idioma == "es" else "⬅️ Amounts",
-                callback_data=f"reinv_{plan_id}_{1 if False else 0}",
+                callback_data=f"reinv_{plan_id}_0",
             )
         ],
     ]
@@ -718,10 +723,10 @@ def teclado_confirmar_retiro_anticipado(idioma="es"):
 def texto_wallets_deposito(idioma="es"):
     if idioma == "en":
         encabezado = "💳 **Official Deposit Wallets (5 Networks)**:\n\n"
-        aviso = "⚠️ Always match the network and address. Report with: `/notificar [Your_Hash]`"
+        aviso = "⚠️ Always match the network and address. Tap **Report Hash** after sending."
     else:
         encabezado = "💳 **Direcciones de Depósito Oficiales (5 Redes)**:\n\n"
-        aviso = "⚠️ Verifica que la red coincida con la dirección antes de enviar. Reporta con: `/notificar [Tu_Hash]`"
+        aviso = "⚠️ Verifica que la red coincida con la dirección antes de enviar. Tras pagar, toca **Reportar Hash**."
 
     bloques = []
     for red_key, info in REDES_INFO.items():
@@ -785,7 +790,10 @@ async def registrar_solicitud_inversion(
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ),
     )
-    cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user_id,))
+    cursor.execute(
+        "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+        (user_id,),
+    )
     conn.commit()
     conn.close()
 
@@ -796,7 +804,7 @@ async def registrar_solicitud_inversion(
         f"• **Red:** `{red_solicitada}`\n"
         f"• **Reinversión Auto:** `{'SÍ' if reinv_flag else 'NO'}`\n\n"
         f"💳 **Envía a esta dirección:**\n`{wallet}`\n\n"
-        f"📲 **Luego envía:** `/notificar [Tu_Hash]`"
+        f"📲 **Luego toca Reportar Hash** en el menú o usa `/notificar [Tu_Hash]`"
     )
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -828,7 +836,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"No se pudo notificar al patrocinador: {e}")
 
-    cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user.id,))
+    cursor.execute(
+        "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+        (user.id,),
+    )
     conn.commit()
     conn.close()
 
@@ -967,7 +978,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nuevo_idioma = data.split("_")[1]
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET idioma = ?, esperando_monto = 0 WHERE user_id = ?", (nuevo_idioma, user.id))
+        cursor.execute(
+            "UPDATE usuarios SET idioma = ?, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+            (nuevo_idioma, user.id),
+        )
         conn.commit()
         conn.close()
 
@@ -1061,9 +1075,22 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     elif data == "btn_planes":
-        texto = "📈 **Elige un Plan**\n\nToca el plan que prefieras para continuar:\n\n"
+        bloques_planes = []
         for k, p in PLANES_INVERSION.items():
-            texto += f"• **{p['nombre']}** (`{p['min']}–{p['max']} {p['moneda']}`): {p['detalle']}\n"
+            rango = (
+                f"{int(p['min']) if p['min'].is_integer() else p['min']}–"
+                f"{int(p['max']) if p['max'].is_integer() else p['max']} {p['moneda']}"
+            )
+            bloques_planes.append(
+                f"🔹 *{p['nombre']}*\n"
+                f"• Ciclo: `{p['tasa_ciclo']*100:.1f}%` | Rango: `{rango}`\n"
+                f"• {p['detalle']}"
+            )
+        texto = (
+            "📈 *Elige un Plan*\n"
+            "Toca un botón abajo para continuar:\n\n"
+            + "\n\n".join(bloques_planes)
+        )
         try:
             await query.message.edit_text(texto, reply_markup=teclado_planes_y_redes(idioma), parse_mode="Markdown")
         except Exception:
@@ -1113,7 +1140,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["plan_elegido"] = plan_id
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET esperando_monto = 1, en_soporte = 0 WHERE user_id = ?", (user.id,))
+        cursor.execute(
+            "UPDATE usuarios SET esperando_monto = 1, en_soporte = 0, esperando_hash = 0 WHERE user_id = ?",
+            (user.id,),
+        )
         conn.commit()
         conn.close()
 
@@ -1170,7 +1200,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💳 **{info['nombre']}**\n"
                 f"• **Monedas:** `{' / '.join(info['monedas'])}`\n"
                 f"• **Dirección Oficial:**\n`{wallet}`\n\n"
-                f"⚠️ Tras transferir, reporta con: `/notificar [Tu_Hash]`"
+                f"⚠️ Tras transferir, toca **Reportar Hash** en el menú o usa `/notificar [Tu_Hash]`"
             )
             try:
                 await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
@@ -1194,10 +1224,37 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+    elif data == "btn_reportar_hash":
+        conn = sqlite3.connect("usuarios.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET esperando_hash = 1, en_soporte = 0, esperando_monto = 0 WHERE user_id = ?",
+            (user.id,),
+        )
+        conn.commit()
+        conn.close()
+
+        texto = (
+            "📲 **Reportar Hash de Pago**\n\n"
+            "Envía o pega el **Hash / TXID** de tu transferencia en tu próximo mensaje:"
+            if idioma == "es"
+            else (
+                "📲 **Report Payment Hash**\n\n"
+                "Send or paste your transfer **Hash / TXID** in your next message:"
+            )
+        )
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception:
+            pass
+
     elif data == "btn_soporte":
         conn = sqlite3.connect("usuarios.db")
         cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET en_soporte = 1, esperando_monto = 0 WHERE user_id = ?", (user.id,))
+        cursor.execute(
+            "UPDATE usuarios SET en_soporte = 1, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+            (user.id,),
+        )
         conn.commit()
         conn.close()
         texto = "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
@@ -1212,9 +1269,18 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = "📈 **Planes de Inversión:**\n\n"
+    bloques_planes = []
     for k, p in PLANES_INVERSION.items():
-        texto += f"• **{p['nombre']}** (`{p['tasa_ciclo']*100:.1f}%`) — {p['detalle']}\n"
+        rango = (
+            f"{int(p['min']) if p['min'].is_integer() else p['min']}–"
+            f"{int(p['max']) if p['max'].is_integer() else p['max']} {p['moneda']}"
+        )
+        bloques_planes.append(
+            f"🔹 *{p['nombre']}*\n"
+            f"• Ciclo: `{p['tasa_ciclo']*100:.1f}%` | Rango: `{rango}`\n"
+            f"• {p['detalle']}"
+        )
+    texto = "📈 *Planes de Inversión*\n\n" + "\n\n".join(bloques_planes)
     await update.message.reply_text(texto, reply_markup=teclado_planes_y_redes("es"), parse_mode="Markdown")
 
 
@@ -1319,235 +1385,4 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown",
             )
-        except Exception as e:
-            print(f"No se pudo notificar al patrocinador {patrocinador_id}: {e}")
-        patrocinador_actual = patrocinador_id
-
-    conn.commit()
-    conn.close()
-
-    try:
-        await context.bot.send_message(
-            chat_id=id_usuario,
-            text=f"✅ **¡Depósito Acreditado con Éxito!**\n• Monto: `{monto} {moneda}` en red `{red}`.",
-            parse_mode="Markdown",
-        )
-        await update.message.reply_text(
-            f"✔️ Acreditado `{monto} {moneda}` (`{red}`) a `{id_usuario}`.",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error al notificar al usuario: {e}")
-
-
-async def referidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
-    row = cursor.fetchone()
-    conn.close()
-    idioma = row[0] if row else "es"
-    texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
-    await update.message.reply_text(texto, parse_mode="Markdown")
-
-
-async def retirar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT deposito_activo, moneda_deposito, red_deposito FROM usuarios WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    deposito = float(row[0]) if row and row[0] else 0.0
-    moneda = row[1] if row and row[1] else "USDT"
-    red = row[2] if row and row[2] else "TRON"
-    calc = calcular_retiro_anticipado(deposito, moneda)
-
-    await update.message.reply_text(
-        f"🏦 **Retiros**\n"
-        f"• Puedes retirar en cualquier momento, perdiendo las ganancias acumuladas y con comisión de red (`0.2` o `0.00001 BTC`).\n"
-        f"• Si tienes capital activo (`{deposito} {moneda}` en `{red}`), el neto anticipado estimado es `{calc['neto_a_recibir']} {calc['moneda']}`.\n"
-        f"• Usa el botón **Retirar** del menú para confirmar.",
-        reply_markup=obtener_menu_principal("es"),
-        parse_mode="Markdown",
-    )
-
-
-async def invertir(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "💡 También puedes invertir por botones tocando **Invertir** en el menú.\n"
-            "Comando rápido: `/invertir [ID_Plan] [Cantidad] [RED_OPCIONAL]`",
-            parse_mode="Markdown",
-        )
-        return
-
-    plan_id = context.args[0]
-    try:
-        cantidad = float(context.args[1])
-    except ValueError:
-        await update.message.reply_text("❌ La cantidad debe ser numérica.")
-        return
-
-    plan = PLANES_INVERSION.get(plan_id)
-    if not plan or not (plan["min"] <= cantidad <= plan["max"]):
-        await update.message.reply_text("❌ Plan inválido o cantidad fuera del rango permitido.")
-        return
-
-    red_solicitada = context.args[2].upper() if len(context.args) >= 3 else plan["red_sugerida"]
-    if red_solicitada not in WALLETS_OFICIALES:
-        await update.message.reply_text("❌ Red inválida. Usa: `TRON`, `TON`, `BTC`, `BSC` o `ETH`.", parse_mode="Markdown")
-        return
-
-    reinv_flag = 1 if context.user_data.get("reinversion_auto") else 0
-    texto = await registrar_solicitud_inversion(update.effective_user.id, plan_id, cantidad, red_solicitada, reinv_flag)
-    await update.message.reply_text(texto, parse_mode="Markdown")
-
-
-async def iniciar_soporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE usuarios SET en_soporte = 1, esperando_monto = 0 WHERE user_id = ?", (user.id,))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text("🎧 **Centro de Soporte Oficial**\n\nEscribe tu duda o problema a continuación:", parse_mode="Markdown")
-
-
-async def responder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if user.id != ADMIN_ID or len(context.args) < 2:
-        return
-
-    id_destino = context.args[0]
-    mensaje_respuesta = " ".join(context.args[1:])
-
-    try:
-        await context.bot.send_message(
-            chat_id=id_destino,
-            text=f"💬 **Mensaje de Soporte:**\n\n{mensaje_respuesta}",
-            parse_mode="Markdown",
-        )
-        await update.message.reply_text(f"✅ Respuesta enviada al usuario `{id_destino}`.", parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
-
-
-async def manejar_mensajes_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    texto = (update.message.text or "").strip()
-    if user.id == ADMIN_ID:
-        return
-
-    conn = sqlite3.connect("usuarios.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT en_soporte, esperando_monto, idioma FROM usuarios WHERE user_id = ?", (user.id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    en_soporte = row[0] if row else 0
-    esperando_monto = row[1] if row and len(row) > 1 else 0
-    idioma = row[2] if row and len(row) > 2 and row[2] else "es"
-
-    if esperando_monto == 1:
-        plan_id = context.user_data.get("plan_elegido", "1")
-        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
-        try:
-            monto_val = float(texto.replace(",", "."))
-        except ValueError:
-            await update.message.reply_text(
-                f"❌ Escribe solo un número entre `{plan['min']}` y `{plan['max']}`.",
-                parse_mode="Markdown",
-            )
-            return
-
-        if not (plan["min"] <= monto_val <= plan["max"]):
-            await update.message.reply_text(
-                f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
-                parse_mode="Markdown",
-            )
-            return
-
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET esperando_monto = 0 WHERE user_id = ?", (user.id,))
-        conn.commit()
-        conn.close()
-
-        context.user_data["monto_elegido"] = monto_val
-        await update.message.reply_text(
-            f"🌐 **Elige la Red de Pago**\n\n"
-            f"• **Plan:** {plan['nombre']}\n"
-            f"• **Monto:** `{monto_val} {plan['moneda']}`",
-            reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
-            parse_mode="Markdown",
-        )
-        return
-
-    if en_soporte == 1:
-        await update.message.reply_text("📩 **Mensaje recibido.** En breve será atendido por un asesor.", parse_mode="Markdown")
-        try:
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    f"🚨 **Nuevo Ticket de Soporte**\n\n"
-                    f"👤 Usuario: {user.first_name} (`{user.id}`)\n"
-                    f"💬 Mensaje: {texto}\n\n"
-                    f"👉 Responder:\n`/responder {user.id} [Mensaje]`"
-                ),
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            print(f"Error reenviando al admin: {e}")
-
-        conn = sqlite3.connect("usuarios.db")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?", (user.id,))
-        conn.commit()
-        conn.close()
-
-
-# --- ARRANQUE PRINCIPAL ---
-async def main():
-    if not TOKEN:
-        print("ERROR: Falta la variable de entorno TOKEN.")
-        return
-
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
-
-    app_bot = ApplicationBuilder().token(TOKEN).build()
-
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("saldo", mostrar_saldo))
-    app_bot.add_handler(CommandHandler("planes", mostrar_planes))
-    app_bot.add_handler(CommandHandler("depositar", depositar))
-    app_bot.add_handler(CommandHandler("notificar", notificar_deposito))
-    app_bot.add_handler(CommandHandler("aprobar", aprobar_deposito))
-    app_bot.add_handler(CommandHandler("referidos", referidos))
-    app_bot.add_handler(CommandHandler("retirar", retirar))
-    app_bot.add_handler(CommandHandler("invertir", invertir))
-    app_bot.add_handler(CommandHandler("soporte", iniciar_soporte))
-    app_bot.add_handler(CommandHandler("responder", responder_admin))
-
-    app_bot.add_handler(CallbackQueryHandler(boton_callback))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensajes_chat))
-
-    await app_bot.initialize()
-    await app_bot.start()
-    await app_bot.updater.start_polling()
-
-    asyncio.create_task(tarea_comprobaciones_canal(app_bot.bot))
-
-    stop_event = asyncio.Event()
-    await stop_event.wait()
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot detenido correctamente.")
+        except Exception
