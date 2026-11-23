@@ -1364,17 +1364,17 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
     patrocinador_actual = id_usuario
 
-    for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
-        cursor.execute("SELECT patrocinador_id FROM usuarios WHERE user_id = ?", (patrocinador_actual,))
-        resultado = cursor.fetchone()
-        if not resultado or not resultado[0]:
-            break
-        patrocinador_id = resultado[0]
-        comision = monto * porcentaje
-        cursor.execute(
-            "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
-            (comision, patrocinador_id),
-        )            
+            for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+            cursor.execute("SELECT patrocinador_id FROM usuarios WHERE user_id = ?", (patrocinador_actual,))
+            resultado = cursor.fetchone()
+            if not resultado or not resultado[0]:
+                break
+            patrocinador_id = resultado[0]
+            comision = monto * porcentaje
+            cursor.execute(
+                "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+                (comision, patrocinador_id),
+            )
             conn.commit()
             try:
                 await context.bot.send_message(
