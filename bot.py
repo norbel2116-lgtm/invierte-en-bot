@@ -41,7 +41,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
 DB_PATH = os.getenv("DB_PATH", "usuarios.db")
 
-# --- 5 WALLETS Y REDES OFICIALES ---
+# --- 5 WALLETS Y REDES OFICIALES (USDT HABILITADO EN TODAS) ---
 WALLETS_OFICIALES = {
     "TRON": os.getenv("WALLET_TRON", "TFWUrcxFh4oknNgmBfTY6jjixhNaGm8t5u"),
     "TON": os.getenv("WALLET_TON", "UQBwUUdb52EJ9T9XMn4lgn625XUDSgQKI3cI_BnAVSA3p8_v"),
@@ -73,7 +73,7 @@ REDES_INFO = {
     },
     "BTC": {
         "nombre": "Bitcoin (BTC)",
-        "monedas": ["BTC"],
+        "monedas": ["USDT", "BTC"],
         "explorer": "https://mempool.space/tx/",
     },
 }
@@ -107,8 +107,19 @@ HASHES_RESPALDO_TRON = [
     "d654d283158a4706531e226ec690bbeaaefe24b51ac9c6b2ddd9236a39f387b1",
 ]
 
-MIN_MONTO_INVERSION = 1.0
+MIN_MONTO_INVERSION = 0.5
 HASHES_USADOS_SESION = set()
+
+# Rangos realistas por moneda para comprobantes multired
+RANGOS_COMPROBANTES = {
+    "USDT": (0.5, 500.0),
+    "TRX": (1.0, 5000.0),
+    "TON": (0.5, 250.0),
+    "GRAM": (1.0, 5000.0),
+    "BNB": (0.002, 8.0),
+    "ETH": (0.001, 4.0),
+    "BTC": (0.00005, 0.08),
+}
 
 COMISION_ANTICIPADA_POR_MONEDA = {
     "USDT": 0.2,
@@ -120,7 +131,7 @@ COMISION_ANTICIPADA_POR_MONEDA = {
     "BTC": 0.00001,
 }
 
-# --- PLANES CON PLAZOS Y PORCENTAJES EQUILIBRADOS ---
+# --- PLANES CON MÍNIMO DESDE 0.5 USDT ---
 PLANES_INVERSION = {
     "1": {
         "nombre": "Plan de Inicio (7 días)",
@@ -128,12 +139,12 @@ PLANES_INVERSION = {
         "modalidad": "plazo_fijo",
         "dias": 7,
         "tasa_ciclo": 0.007,
-        "min": 3.0,
+        "min": 0.5,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "TRON",
         "permite_reinvest": True,
-        "detalle": "7 días | 0.7% al completar el ciclo. Ideal para empezar sin bloqueos largos.",
+        "detalle": "7 días | 0.7% al completar el ciclo. Desde 0.5 USDT sin bloqueos largos.",
     },
     "2": {
         "nombre": "Plan Crecimiento (14 días)",
@@ -141,7 +152,7 @@ PLANES_INVERSION = {
         "modalidad": "plazo_fijo",
         "dias": 14,
         "tasa_ciclo": 0.024,
-        "min": 5.0,
+        "min": 0.5,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "TON",
@@ -154,7 +165,7 @@ PLANES_INVERSION = {
         "modalidad": "plazo_fijo",
         "dias": 21,
         "tasa_ciclo": 0.078,
-        "min": 10.0,
+        "min": 1.0,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "BSC",
@@ -167,7 +178,7 @@ PLANES_INVERSION = {
         "modalidad": "liquidez_flexible",
         "dias": 0,
         "tasa_ciclo": 0.005,
-        "min": 3.0,
+        "min": 0.5,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "TRON",
@@ -180,7 +191,7 @@ PLANES_INVERSION = {
         "modalidad": "aporte_meta",
         "dias": 30,
         "tasa_ciclo": 0.032,
-        "min": 2.0,
+        "min": 0.5,
         "max": 1000.0,
         "moneda": "USDT",
         "red_sugerida": "ETH",
@@ -191,10 +202,14 @@ PLANES_INVERSION = {
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn = sqlite3.connect(DB_PATH, timeout=15, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
+
+
+async def db_exec(fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 # --- BASE DE DATOS SQLITE ---
@@ -307,8 +322,11 @@ def es_hash_valido(tx_hash: str, red: str) -> bool:
 
 def _marcar_hash_usado(tx_hash: str):
     HASHES_USADOS_SESION.add(tx_hash)
-    if len(HASHES_USADOS_SESION) > 500:
+    if len(HASHES_USADOS_SESION) > 2000:
+        # Conserva los últimos 500 sin vaciar por completo
+        recientes = list(HASHES_USADOS_SESION)[-500:]
         HASHES_USADOS_SESION.clear()
+        HASHES_USADOS_SESION.update(recientes)
         HASHES_USADOS_SESION.add(tx_hash)
 
 
@@ -340,19 +358,23 @@ def _registrar_hash_publicado(tx_hash: str, red: str, moneda: str, monto: float)
         print(f"Error guardando hash publicado: {e}", flush=True)
 
 
-def _cumple_filtro_monto(monto: float, tipo_operacion: str = "deposito") -> bool:
+def _cumple_filtro_monto(monto: float, moneda: str = "USDT") -> bool:
     if monto is None or monto <= 0:
         return False
-    return monto >= MIN_MONTO_INVERSION
+    m_upper = (moneda or "USDT").upper()
+    min_val, max_val = RANGOS_COMPROBANTES.get(m_upper, (MIN_MONTO_INVERSION, 1000.0))
+    return min_val <= monto <= max_val
 
 
-async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
-    url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=25"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, _tipo_operacion: str = "deposito"):
+    url = f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20?limit=50"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
-        for tx in data.get("data") or []:
+        txs = data.get("data") or []
+        random.shuffle(txs)
+        for tx in txs:
             tx_hash = tx.get("transaction_id")
             if not es_hash_valido(tx_hash, "TRON"):
                 continue
@@ -361,9 +383,9 @@ async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tip
             if raw_val is None:
                 continue
             monto = round(float(raw_val) / (10 ** decimals), 4)
-            if not _cumple_filtro_monto(monto, tipo_operacion) or _hash_ya_publicado(tx_hash):
+            simbolo = ((tx.get("token_info") or {}).get("symbol") or "USDT").upper()
+            if not _cumple_filtro_monto(monto, simbolo) or _hash_ya_publicado(tx_hash):
                 continue
-            simbolo = (tx.get("token_info") or {}).get("symbol", "USDT")
             return {
                 "hash": tx_hash,
                 "monto": monto,
@@ -375,15 +397,17 @@ async def obtener_tx_real_tron(session: aiohttp.ClientSession, address: str, tip
     return None
 
 
-async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
+async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, _tipo_operacion: str = "deposito"):
     url = f"https://mempool.space/api/address/{address}/txs"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
         if resp.status != 200:
             return None
         txs = await resp.json()
         if not isinstance(txs, list):
             return None
-        for tx in txs[:20]:
+        candidatos = txs[:30]
+        random.shuffle(candidatos)
+        for tx in candidatos:
             txid = tx.get("txid")
             if not es_hash_valido(txid, "BTC"):
                 continue
@@ -398,7 +422,7 @@ async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo
             if monto_sats == 0 and tx.get("vout"):
                 monto_sats = sum(int(vout.get("value", 0)) for vout in (tx.get("vout") or []))
             monto_btc = round(monto_sats / 1e8, 6)
-            if not _cumple_filtro_monto(monto_btc, tipo_operacion) or _hash_ya_publicado(txid):
+            if not _cumple_filtro_monto(monto_btc, "BTC") or _hash_ya_publicado(txid):
                 continue
             return {
                 "hash": txid,
@@ -411,15 +435,17 @@ async def obtener_tx_real_btc(session: aiohttp.ClientSession, address: str, tipo
     return None
 
 
-async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str, tipo_operacion: str = "deposito"):
-    url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=25"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str, _tipo_operacion: str = "deposito"):
+    url = f"https://toncenter.com/api/v2/getTransactions?address={address}&limit=50"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
         if resp.status != 200:
             return None
         data = await resp.json()
         if not data.get("ok"):
             return None
-        for tx in data.get("result") or []:
+        txs = data.get("result") or []
+        random.shuffle(txs)
+        for tx in txs:
             tx_id_obj = tx.get("transaction_id") or {}
             tx_hash = tx_id_obj.get("hash")
             if not es_hash_valido(tx_hash, "TON"):
@@ -427,7 +453,7 @@ async def obtener_tx_real_ton(session: aiohttp.ClientSession, address: str, tipo
             in_msg = tx.get("in_msg") or {}
             value_nano = int(in_msg.get("value") or 0)
             monto_ton = round(value_nano / 1e9, 4)
-            if not _cumple_filtro_monto(monto_ton, tipo_operacion) or _hash_ya_publicado(tx_hash):
+            if not _cumple_filtro_monto(monto_ton, "TON") or _hash_ya_publicado(tx_hash):
                 continue
             return {
                 "hash": tx_hash,
@@ -445,9 +471,9 @@ async def _obtener_tx_evm_rpc(
     rpc_urls: list[str],
     red_key: str,
     simbolo: str,
-    tipo_operacion: str = "deposito",
+    _tipo_operacion: str = "deposito",
 ):
-    req_timeout = aiohttp.ClientTimeout(total=10)
+    req_timeout = aiohttp.ClientTimeout(total=8)
     for rpc_url in rpc_urls:
         try:
             payload_latest = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -460,7 +486,7 @@ async def _obtener_tx_evm_rpc(
                     continue
                 block_num = int(hex_block, 16)
 
-            for offset in range(0, 3):
+            for offset in range(0, 2):
                 target_hex = hex(block_num - offset)
                 payload_block = {
                     "jsonrpc": "2.0",
@@ -474,13 +500,13 @@ async def _obtener_tx_evm_rpc(
                     blk_json = await resp_blk.json()
                     txs = (blk_json.get("result") or {}).get("transactions") or []
                     random.shuffle(txs)
-                    for tx in txs[:40]:
+                    for tx in txs[:30]:
                         tx_hash = tx.get("hash")
                         if not es_hash_valido(tx_hash, red_key):
                             continue
                         val_wei = int(tx.get("value") or "0x0", 16)
                         monto = round(val_wei / 1e18, 6)
-                        if not _cumple_filtro_monto(monto, tipo_operacion) or _hash_ya_publicado(tx_hash):
+                        if not _cumple_filtro_monto(monto, simbolo) or _hash_ya_publicado(tx_hash):
                             continue
                         return {
                             "hash": tx_hash,
@@ -526,8 +552,12 @@ def calcular_retiro_anticipado(capital_base: float, moneda: str):
 
 
 async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
-    orden_redes = ["TRON", "TON", "BTC", "BSC", "ETH"]
-    random.shuffle(orden_redes)
+    # Priorizamos primero TRON, TON y BTC para darles presencia equilibrada
+    prioritarias = ["TRON", "TON", "BTC"]
+    secundarias = ["BSC", "ETH"]
+    random.shuffle(prioritarias)
+    random.shuffle(secundarias)
+    orden_redes = prioritarias + secundarias
 
     consultores = {
         "TRON": obtener_tx_real_tron,
@@ -537,6 +567,7 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
         "ETH": obtener_tx_real_eth,
     }
 
+    sin_resultado = []
     connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
     async with aiohttp.ClientSession(connector=connector) as session:
         for red_key in orden_redes:
@@ -548,11 +579,14 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
                 comp = await fn(session, addr, tipo_operacion)
                 if comp and comp.get("hash") and not _hash_ya_publicado(comp["hash"]):
                     return comp
+                sin_resultado.append(red_key)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                sin_resultado.append(f"{red_key}(err)")
                 print(f"Error consultando blockchain {red_key}: {e}", flush=True)
 
+    print(f"Multired sin tx válida en ciclo ({tipo_operacion}): {', '.join(sin_resultado)}", flush=True)
     return None
 
 
@@ -586,13 +620,14 @@ async def tarea_comprobaciones_canal(bot):
                                     parse_mode="Markdown",
                                     disable_web_page_preview=True,
                                 )
-                                _registrar_hash_publicado(
-                                    comp["hash"], comp["red"], comp["moneda"], comp["monto"]
+                                await db_exec(
+                                    _registrar_hash_publicado,
+                                    comp["hash"], comp["red"], comp["moneda"], comp["monto"],
                                 )
                                 enviados += 1
                             except TelegramError as te:
                                 print(f"Error enviando comprobante al canal: {te}", flush=True)
-                            await asyncio.sleep(2)
+                            await asyncio.sleep(1.5)
 
                     print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}", flush=True)
             except asyncio.CancelledError:
@@ -606,7 +641,9 @@ async def tarea_comprobaciones_canal(bot):
     except asyncio.CancelledError:
         print("Tarea de comprobaciones cancelada limpiamente.", flush=True)
         raise
-# --- TECLADOS INLINE CORTOS Y CLAROS ---
+
+
+# --- TECLADOS INLINE CORTOS Y CLAROS (SIN BOTÓN REPORTAR HASH EN MENÚ PRINCIPAL) ---
 def obtener_menu_idiomas():
     return InlineKeyboardMarkup([
         [
@@ -625,14 +662,14 @@ def obtener_menu_principal(idioma="es"):
             ],
             [
                 InlineKeyboardButton("📈 Invest", callback_data="btn_planes"),
-                InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
+                InlineKeyboardButton("💳 Wallets (USDT)", callback_data="btn_depositar"),
             ],
             [
+                InlineKeyboardButton("📜 History", callback_data="btn_historial"),
                 InlineKeyboardButton("👥 Referrals", callback_data="btn_referidos"),
-                InlineKeyboardButton("💸 Withdraw", callback_data="btn_retirar"),
             ],
             [
-                InlineKeyboardButton("📲 Report Hash", callback_data="btn_reportar_hash"),
+                InlineKeyboardButton("💸 Withdraw", callback_data="btn_retirar"),
                 InlineKeyboardButton("🎧 Support", callback_data="btn_soporte"),
             ],
             [
@@ -648,20 +685,30 @@ def obtener_menu_principal(idioma="es"):
         ],
         [
             InlineKeyboardButton("📈 Invertir", callback_data="btn_planes"),
-            InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
+            InlineKeyboardButton("💳 Wallets (USDT)", callback_data="btn_depositar"),
         ],
         [
+            InlineKeyboardButton("📜 Historial", callback_data="btn_historial"),
             InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
-            InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
         ],
         [
-            InlineKeyboardButton("📲 Reportar Hash", callback_data="btn_reportar_hash"),
+            InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
             InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
         ],
         [
             InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
             InlineKeyboardButton("🌐 Idioma", callback_data="btn_cambiar_idioma"),
         ],
+    ])
+
+
+def teclado_tras_direccion(idioma="es"):
+    volver_txt = "⬅️ Menú" if idioma == "es" else "⬅️ Menu"
+    volver_cb = "lang_es" if idioma == "es" else "lang_en"
+    enviar_txt = "📩 Enviar Hash / TXID" if idioma == "es" else "📩 Send Hash / TXID"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(enviar_txt, callback_data="enviar_hash_pago")],
+        [InlineKeyboardButton(volver_txt, callback_data=volver_cb)],
     ])
 
 
@@ -703,15 +750,16 @@ def teclado_reinversion(plan_id: str, idioma="es"):
 def teclado_montos_inversion(plan_id: str, idioma="es"):
     plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
     moneda = plan["moneda"]
-    sugeridos = [5, 10, 20, 50, 100]
+    sugeridos = [0.5, 1, 5, 10, 50, 100]
     validos = [m for m in sugeridos if plan["min"] <= m <= plan["max"]]
     if not validos:
-        validos = [int(plan["min"]) if plan["min"].is_integer() else plan["min"]]
+        validos = [0.5]
 
     filas = []
     fila_actual = []
     for m in validos:
-        fila_actual.append(InlineKeyboardButton(f"{m} {moneda}", callback_data=f"monto_{plan_id}_{m}"))
+        etiqueta = f"{m:g} {moneda}"
+        fila_actual.append(InlineKeyboardButton(etiqueta, callback_data=f"monto_{plan_id}_{m}"))
         if len(fila_actual) == 2:
             filas.append(fila_actual)
             fila_actual = []
@@ -760,11 +808,11 @@ def teclado_confirmar_retiro_anticipado(idioma="es"):
 
 def texto_wallets_deposito(idioma="es"):
     if idioma == "en":
-        encabezado = "💳 **Official Deposit Wallets (5 Networks)**:\n\n"
-        aviso = "⚠️ Always match the network and address. Tap **Report Hash** after sending."
+        encabezado = "💳 **Official Deposit Wallets (USDT Supported on All 5 Networks)**:\n\n"
+        aviso = "⚠️ Always match the network and address. After sending your transfer, tap **Send Hash / TXID** below."
     else:
-        encabezado = "💳 **Direcciones de Depósito Oficiales (5 Redes)**:\n\n"
-        aviso = "⚠️ Verifica que la red coincida con la dirección antes de enviar. Tras pagar, toca **Reportar Hash**."
+        encabezado = "💳 **Direcciones de Depósito Oficiales (USDT en las 5 Redes)**:\n\n"
+        aviso = "⚠️ Verifica que la red coincida con la dirección antes de enviar. Tras hacer la transferencia, toca **Enviar Hash / TXID** abajo."
 
     bloques = []
     for red_key, info in REDES_INFO.items():
@@ -781,24 +829,24 @@ def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
         return (
             f"🌟 **Welcome! We are glad you want to join**\n\n"
             f"🚀 **Your Exclusive Referral Link:**\n`{link_referido}`\n\n"
-            f"📊 **Balanced Plans:**\n"
-            f"• **Starter (7d - 0.7%):** Min 3 USD\n"
-            f"• **Growth (14d - 1.2%/wk):** Min 5 USD\n"
-            f"• **Pro / Elite (21d - 2.6%/wk):** Min 10 USD\n\n"
+            f"📊 **Balanced Plans (From 0.5 USDT):**\n"
+            f"• **Starter (7d - 0.7%):** Min 0.5 USDT\n"
+            f"• **Growth (14d - 1.2%/wk):** Min 0.5 USDT\n"
+            f"• **Pro / Elite (21d - 2.6%/wk):** Min 1 USDT\n\n"
             f"💡 **Early Withdrawal Rule:** Available anytime, forfeiting profits + network fee (0.2 or 0.00001 BTC)."
         )
     return (
         f"🌟 **¡Bienvenido/a! Nos alegra mucho que quieras sumarte**\n\n"
         f"🚀 **Tu Link de Referido Exclusivo:**\n`{link_referido}`\n\n"
-        f"📊 **Planes Equilibrados:**\n"
-        f"• **Inicio (7 días - 0.7%):** Mín 3 USD\n"
-        f"• **Crecimiento (14 días - 1.2%/sem):** Mín 5 USD\n"
-        f"• **Pro / Élite (21 días - 2.6%/sem):** Mín 10 USD\n\n"
+        f"📊 **Planes Equilibrados (Desde 0.5 USDT):**\n"
+        f"• **Inicio (7 días - 0.7%):** Mín 0.5 USDT\n"
+        f"• **Crecimiento (14 días - 1.2%/sem):** Mín 0.5 USDT\n"
+        f"• **Pro / Élite (21 días - 2.6%/sem):** Mín 1 USDT\n\n"
         f"💡 **Regla de Retiro Anticipado:** Disponible en cualquier momento; se pierden ganancias y aplica comisión de red (0.2 o 0.00001 BTC)."
     )
 
 
-async def registrar_solicitud_inversion(
+def _db_registrar_solicitud_sync(
     user_id: int,
     plan_id: str,
     cantidad: float,
@@ -806,8 +854,6 @@ async def registrar_solicitud_inversion(
     reinv_flag: int,
 ):
     plan = PLANES_INVERSION[plan_id]
-    wallet = WALLETS_OFICIALES[red_solicitada]
-
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -829,20 +875,58 @@ async def registrar_solicitud_inversion(
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
+        # Dejamos esperando_hash = 1 listo para que tras pagar envíe directamente el hash
         cursor.execute(
-            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
+            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 1, en_soporte = 0 WHERE user_id = ?",
             (user_id,),
         )
 
+
+async def registrar_solicitud_inversion(
+    user_id: int,
+    plan_id: str,
+    cantidad: float,
+    red_solicitada: str,
+    reinv_flag: int,
+):
+    plan = PLANES_INVERSION[plan_id]
+    wallet = WALLETS_OFICIALES[red_solicitada]
+    await db_exec(
+        _db_registrar_solicitud_sync,
+        user_id, plan_id, cantidad, red_solicitada, reinv_flag,
+    )
     return (
         f"✅ **Solicitud Registrada**\n\n"
         f"• **Plan:** {plan['nombre']}\n"
-        f"• **Monto:** `{cantidad} {plan['moneda']}`\n"
-        f"• **Red:** `{red_solicitada}`\n"
+        f"• **Monto:** `{cantidad:g} {plan['moneda']}`\n"
+        f"• **Red:** `{red_solicitada}` (USDT habilitado)\n"
         f"• **Reinversión Auto:** `{'SÍ' if reinv_flag else 'NO'}`\n\n"
         f"💳 **Envía a esta dirección:**\n`{wallet}`\n\n"
-        f"📲 **Luego toca Reportar Hash** en el menú o usa `/notificar [Tu_Hash]`"
+        f"📩 **Una vez que hagas la transferencia, envía aquí el Hash / TXID** (ya quedó habilitado para que lo pegues directamente o uses `/notificar [Tu_Hash]`)."
     )
+
+
+def _db_start_sync(user_id: int, first_name: str, patrocinador_id):
+    notificar_patrocinador = False
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, patrocinador_id, idioma FROM usuarios WHERE user_id = ?", (user_id,))
+        existe = cursor.fetchone()
+        idioma = existe[2] if existe and existe[2] else "es"
+
+        if not existe:
+            cursor.execute(
+                "INSERT INTO usuarios (user_id, nombre, patrocinador_id, idioma) VALUES (?, ?, ?, ?)",
+                (user_id, first_name, patrocinador_id, "es"),
+            )
+            if patrocinador_id and patrocinador_id != user_id:
+                notificar_patrocinador = True
+
+        cursor.execute(
+            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0, en_soporte = 0 WHERE user_id = ?",
+            (user_id,),
+        )
+    return notificar_patrocinador, idioma
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -851,25 +935,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     patrocinador_id = int(args[0]) if args and args[0].isdigit() else None
-    notificar_patrocinador = False
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id, patrocinador_id FROM usuarios WHERE user_id = ?", (user.id,))
-        existe = cursor.fetchone()
-
-        if not existe:
-            cursor.execute(
-                "INSERT INTO usuarios (user_id, nombre, patrocinador_id, idioma) VALUES (?, ?, ?, ?)",
-                (user.id, user.first_name, patrocinador_id, "es"),
-            )
-            if patrocinador_id and patrocinador_id != user.id:
-                notificar_patrocinador = True
-
-        cursor.execute(
-            "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-            (user.id,),
-        )
+    notificar_patrocinador, _ = await db_exec(
+        _db_start_sync, user.id, user.first_name, patrocinador_id
+    )
 
     if notificar_patrocinador and patrocinador_id:
         try:
@@ -889,20 +958,86 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             await update.message.reply_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
         elif update.callback_query:
-            try:
-                await update.callback_query.answer()
-            except Exception:
-                pass
             await update.callback_query.message.edit_text(texto, reply_markup=obtener_menu_idiomas(), parse_mode="Markdown")
     except Exception as e:
         print(f"Error en start: {e}", flush=True)
 
 
-async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAULT_TYPE, idioma: str):
-    query = update.callback_query
-    data = query.data
-    user_id = query.from_user.id
+def _db_obtener_idioma_sync(user_id: int) -> str:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+    return row[0] if row and row[0] else "es"
 
+
+def _db_set_idioma_sync(user_id: int, first_name: str, nuevo_idioma: str):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO usuarios (user_id, nombre, idioma) VALUES (?, ?, ?)",
+            (user_id, first_name, nuevo_idioma),
+        )
+        cursor.execute(
+            "UPDATE usuarios SET idioma = ?, esperando_monto = 0, esperando_hash = 0, en_soporte = 0 WHERE user_id = ?",
+            (nuevo_idioma, user_id),
+        )
+
+
+def _db_set_estado_sync(user_id: int, esperando_monto=0, esperando_hash=0, en_soporte=0):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET esperando_monto = ?, esperando_hash = ?, en_soporte = ? WHERE user_id = ?",
+            (esperando_monto, esperando_hash, en_soporte, user_id),
+        )
+
+
+def _db_obtener_saldo_sync(user_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT deposito_activo, moneda_deposito, red_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?",
+            (user_id,),
+        )
+        return cursor.fetchone()
+
+
+def _db_obtener_liquidez_sync():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
+        row = cursor.fetchone()
+    return row[0] if row else 124500.00
+
+
+def _db_obtener_historial_sync(user_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT plan_id, monto, moneda, red, dias_plazo, fecha_inicio, estado
+            FROM inversiones
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 10
+            """,
+            (user_id,),
+        )
+        return cursor.fetchall()
+
+
+def _db_retiro_consultar_sync(user_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT deposito_activo, moneda_deposito, red_deposito FROM usuarios WHERE user_id = ?",
+            (user_id,),
+        )
+        return cursor.fetchone()
+
+
+def _db_retiro_confirmar_sync(user_id: int):
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -913,55 +1048,68 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
         deposito_activo = float(row[0]) if row and row[0] else 0.0
         moneda = row[1] if row and row[1] else "USDT"
         red = row[2] if row and row[2] else "TRON"
+        calc = calcular_retiro_anticipado(deposito_activo, moneda)
+        if calc["capital_base"] <= 0:
+            return None, moneda, red
+        cursor.execute(
+            "UPDATE usuarios SET deposito_activo = 0, fecha_deposito = NULL WHERE user_id = ?",
+            (user_id,),
+        )
+        cursor.execute(
+            "UPDATE inversiones SET estado = 'retirado_anticipado' WHERE user_id = ? AND estado = 'activa'",
+            (user_id,),
+        )
+        return calc, moneda, red
 
-        if data == "btn_retirar":
-            if deposito_activo <= 0:
-                texto = (
-                    "🏦 **Retiros:** No tienes capital activo disponible para retirar."
-                    if idioma == "es"
-                    else "🏦 **Withdrawals:** You have no active capital available to withdraw."
-                )
-                await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-                return
 
-            calc = calcular_retiro_anticipado(deposito_activo, moneda)
-            if idioma == "en":
-                texto = (
-                    f"⚠️ **Early Withdrawal Notice**\n\n"
-                    f"You can withdraw anytime, **but you forfeit accrued profits** and a network fee applies.\n\n"
-                    f"• **Base Capital:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
-                    f"• **Accrued Profits:** `Forfeited (0)`\n"
-                    f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                    f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`"
-                )
-            else:
-                texto = (
-                    f"⚠️ **Aviso de Retiro Anticipado**\n\n"
-                    f"Puedes retirar en cualquier momento, **pero pierdes las ganancias acumuladas** y se descuenta comisión de red.\n\n"
-                    f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
-                    f"• **Ganancias:** `Se pierden al retirar antes (0)`\n"
-                    f"• **Comisión de Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
-                    f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`"
-                )
-            await query.message.edit_text(texto, reply_markup=teclado_confirmar_retiro_anticipado(idioma), parse_mode="Markdown")
+async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAULT_TYPE, idioma: str):
+    query = update.callback_query
+    data = query.data
+    user_id = query.from_user.id
+
+    if data == "btn_retirar":
+        row = await db_exec(_db_retiro_consultar_sync, user_id)
+        deposito_activo = float(row[0]) if row and row[0] else 0.0
+        moneda = row[1] if row and row[1] else "USDT"
+        red = row[2] if row and row[2] else "TRON"
+
+        if deposito_activo <= 0:
+            texto = (
+                "🏦 **Retiros:** No tienes capital activo disponible para retirar."
+                if idioma == "es"
+                else "🏦 **Withdrawals:** You have no active capital available to withdraw."
+            )
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
             return
 
         calc = calcular_retiro_anticipado(deposito_activo, moneda)
-        if data == "confirm_retiro_anticipado":
-            if calc["capital_base"] <= 0:
-                await query.message.edit_text("⚠️ Sin saldo activo.", reply_markup=obtener_menu_principal(idioma))
-                return
-
-            cursor.execute(
-                "UPDATE usuarios SET deposito_activo = 0, fecha_deposito = NULL WHERE user_id = ?",
-                (user_id,),
+        if idioma == "en":
+            texto = (
+                f"⚠️ **Early Withdrawal Notice**\n\n"
+                f"You can withdraw anytime, **but you forfeit accrued profits** and a network fee applies.\n\n"
+                f"• **Base Capital:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
+                f"• **Accrued Profits:** `Forfeited (0)`\n"
+                f"• **Network Fee:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                f"• **Net to Receive:** `{calc['neto_a_recibir']} {calc['moneda']}`"
             )
-            cursor.execute(
-                "UPDATE inversiones SET estado = 'retirado_anticipado' WHERE user_id = ? AND estado = 'activa'",
-                (user_id,),
+        else:
+            texto = (
+                f"⚠️ **Aviso de Retiro Anticipado**\n\n"
+                f"Puedes retirar en cualquier momento, **pero pierdes las ganancias acumuladas** y se descuenta comisión de red.\n\n"
+                f"• **Capital Base:** `{calc['capital_base']} {calc['moneda']}` ({red})\n"
+                f"• **Ganancias:** `Se pierden al retirar antes (0)`\n"
+                f"• **Comisión de Red:** `-{calc['comision_red']} {calc['moneda']}`\n"
+                f"• **Neto a Recibir:** `{calc['neto_a_recibir']} {calc['moneda']}`"
             )
+        await query.message.edit_text(texto, reply_markup=teclado_confirmar_retiro_anticipado(idioma), parse_mode="Markdown")
+        return
 
     if data == "confirm_retiro_anticipado":
+        calc, moneda, red = await db_exec(_db_retiro_confirmar_sync, user_id)
+        if not calc:
+            await query.message.edit_text("⚠️ Sin saldo activo.", reply_markup=obtener_menu_principal(idioma))
+            return
+
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
@@ -1008,11 +1156,11 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         return
 
-    print(f"Callback recibido: {query.data} de user={query.from_user.id}", flush=True)
+    # Responder de inmediato para evitar demora visual al pulsar botones
     try:
         await query.answer()
-    except Exception as e:
-        print(f"Error en query.answer(): {e}", flush=True)
+    except Exception:
+        pass
 
     data = query.data
     user = query.from_user
@@ -1023,27 +1171,18 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("lang_"):
         nuevo_idioma = data.split("_")[1]
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR IGNORE INTO usuarios (user_id, nombre, idioma) VALUES (?, ?, ?)",
-                (user.id, user.first_name, nuevo_idioma),
-            )
-            cursor.execute(
-                "UPDATE usuarios SET idioma = ?, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-                (nuevo_idioma, user.id),
-            )
+        await db_exec(_db_set_idioma_sync, user.id, user.first_name, nuevo_idioma)
 
         if nuevo_idioma == "en":
             texto = (
-                f"🛡️ **Welcome to Invest Bot (5 Networks)**\n\n"
-                f"Hello, **{user.first_name}**. Tap **Invest** to choose a plan, amount, and network by buttons.\n\n"
+                f"🛡️ **Welcome to Invest Bot (5 Networks · USDT Ready)**\n\n"
+                f"Hello, **{user.first_name}**. Minimum investment starts at **0.5 USDT**.\n\n"
                 f"👇 **Select an option:**"
             )
         else:
             texto = (
-                f"🛡️ **Bienvenido a Invierte Bot (5 Redes)**\n\n"
-                f"Hola, **{user.first_name}**. Toca **Invertir** para elegir plan, monto y red con botones.\n\n"
+                f"🛡️ **Bienvenido a Invierte Bot (5 Redes · USDT en Todas)**\n\n"
+                f"Hola, **{user.first_name}**. Inversión mínima desde **0.5 USDT**.\n\n"
                 f"👇 **Selecciona una opción:**"
             )
 
@@ -1053,30 +1192,19 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error al editar idioma: {e}", flush=True)
         return
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT idioma FROM usuarios WHERE user_id = ?", (user.id,))
-        row = cursor.fetchone()
-    idioma = row[0] if row and row[0] else "es"
+    idioma = await db_exec(_db_obtener_idioma_sync, user.id)
 
     if data in ("btn_retirar", "confirm_retiro_anticipado", "cancel_retiro_anticipado"):
         await procesar_retiro_anticipado(update, context, idioma)
         return
 
     if data == "btn_saldo":
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT deposito_activo, moneda_deposito, red_deposito, fecha_deposito, ganancias_referidos FROM usuarios WHERE user_id = ?",
-                (user.id,),
-            )
-            row = cursor.fetchone()
-
+        row = await db_exec(_db_obtener_saldo_sync, user.id)
         if not row or not row[0] or float(row[0]) == 0:
             texto = (
-                "💰 **Balance:** 0 USD\n⚠️ No active investments."
+                "💰 **Balance:** 0 USDT\n⚠️ No active investments (min 0.5 USDT)."
                 if idioma == "en"
-                else "💰 **Tu Balance Actual:**\n\n• Capital Activo: **0**\n⚠️ No tienes inversiones activas."
+                else "💰 **Tu Balance Actual:**\n\n• Capital Activo: **0 USDT**\n⚠️ No tienes inversiones activas (mínimo 0.5 USDT)."
             )
         else:
             deposito, moneda, red, fecha_str, ganancia_ref = row
@@ -1084,7 +1212,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idioma == "en":
                 texto = (
                     f"💰 **Active Balance:**\n"
-                    f"• Capital: `{deposito} {moneda}` ({red})\n"
+                    f"• Capital: `{deposito:g} {moneda}` ({red})\n"
                     f"• Days Active: `{dias}`\n"
                     f"• Referral Earnings: `{ganancia_ref or 0:.2f} {moneda}`\n"
                     f"• Early Exit: Forfeits profits + fee (`0.2` / `0.00001 BTC`)"
@@ -1092,7 +1220,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 texto = (
                     f"💰 **Tu Balance Activo:**\n"
-                    f"• Capital: `{deposito} {moneda}` ({red})\n"
+                    f"• Capital: `{deposito:g} {moneda}` ({red})\n"
                     f"• Días Activo: `{dias}`\n"
                     f"• Ganancias por Referidos: `{ganancia_ref or 0:.2f} {moneda}`\n"
                     f"• Retiro Anticipado: Pierdes ganancias + comisión (`0.2` / `0.00001 BTC`)"
@@ -1103,16 +1231,12 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Error en btn_saldo: {e}", flush=True)
 
     elif data == "btn_liquidez":
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT fondo_actual FROM liquidez_global WHERE id = 1")
-            row = cursor.fetchone()
-        fondo_actual = row[0] if row else 124500.00
-
+        fondo_actual = await db_exec(_db_obtener_liquidez_sync)
         texto = (
             f"🏦 **Fondo de Liquidez Global**\n\n"
             f"• **Reserva Actual:** `${fondo_actual:,.2f} USD`\n"
-            f"• **Redes:** TRON, TON, BTC, BSC, ETH\n"
+            f"• **Redes y USDT:** TRON, TON, BTC, BSC, ETH (USDT habilitado en todas)\n"
+            f"• **Mínimo de Inversión:** `0.5 USDT`\n"
             f"• **Retiro Anticipado:** Disponible perdiendo ganancias + comisión de red."
         )
         try:
@@ -1120,20 +1244,42 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Error en btn_liquidez: {e}", flush=True)
 
+    elif data == "btn_historial":
+        filas = await db_exec(_db_obtener_historial_sync, user.id)
+        if not filas:
+            texto = (
+                "📜 **Historial de Inversiones:**\n\nAún no tienes inversiones registradas."
+                if idioma == "es"
+                else "📜 **Investment History:**\n\nYou have no recorded investments yet."
+            )
+        else:
+            lineas = []
+            for plan_id, monto, moneda, red, dias, fecha_ini, estado in filas:
+                nombre_plan = (PLANES_INVERSION.get(str(plan_id)) or {}).get("nombre", f"Plan {plan_id}")
+                fecha_corta = (fecha_ini or "")[:10]
+                lineas.append(
+                    f"• *{nombre_plan}* — `{float(monto):g} {moneda}` ({red})\n"
+                    f"  Plazo: `{dias}d` | Estado: `{estado}` | Fecha: `{fecha_corta}`"
+                )
+            encabezado = "📜 **Tus Últimas Inversiones:**\n\n" if idioma == "es" else "📜 **Your Recent Investments:**\n\n"
+            texto = encabezado + "\n\n".join(lineas)
+
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error en btn_historial: {e}", flush=True)
+
     elif data == "btn_planes":
         bloques_planes = []
-        for k, p in PLANES_INVERSION.items():
-            rango = (
-                f"{int(p['min']) if p['min'].is_integer() else p['min']}–"
-                f"{int(p['max']) if p['max'].is_integer() else p['max']} {p['moneda']}"
-            )
+        for _, p in PLANES_INVERSION.items():
+            rango = f"{p['min']:g}–{p['max']:g} {p['moneda']}"
             bloques_planes.append(
                 f"🔹 *{p['nombre']}*\n"
                 f"• Ciclo: `{p['tasa_ciclo']*100:.1f}%` | Rango: `{rango}`\n"
                 f"• {p['detalle']}"
             )
         texto = (
-            "📈 *Elige un Plan*\n"
+            "📈 *Elige un Plan (Desde 0.5 USDT)*\n"
             "Toca un botón abajo para continuar:\n\n"
             + "\n\n".join(bloques_planes)
         )
@@ -1152,7 +1298,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📌 **{plan['nombre']}**\n\n"
             f"• **Plazo:** `{plan['dias']} días` (0 = flexible)\n"
             f"• **Ciclo:** `{plan['tasa_ciclo']*100:.1f}%`\n"
-            f"• **Límites:** `{plan['min']} - {plan['max']} {plan['moneda']}`\n\n"
+            f"• **Límites:** `{plan['min']:g} - {plan['max']:g} {plan['moneda']}`\n\n"
             f"¿Quieres **Reinversión Automática** al terminar el ciclo?"
         )
         try:
@@ -1172,7 +1318,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         texto = (
             f"💵 **Elige el Monto · {plan['nombre']}**\n"
             f"• **Reinversión Auto:** `{estado_reinv}`\n"
-            f"• **Rango:** `{plan['min']} - {plan['max']} {plan['moneda']}`\n\n"
+            f"• **Rango:** `{plan['min']:g} - {plan['max']:g} {plan['moneda']}`\n\n"
             f"Toca un monto rápido o elige **Otro monto**:"
         )
         try:
@@ -1184,18 +1330,13 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         plan_id = data.replace("otro_monto_", "")
         plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
         context.user_data["plan_elegido"] = plan_id
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE usuarios SET esperando_monto = 1, en_soporte = 0, esperando_hash = 0 WHERE user_id = ?",
-                (user.id,),
-            )
+        await db_exec(_db_set_estado_sync, user.id, 1, 0, 0)
 
         texto = (
             f"✏️ **Escribe el Monto a Invertir**\n\n"
             f"• **Plan:** {plan['nombre']}\n"
-            f"• **Permitido:** `{plan['min']}` a `{plan['max']} {plan['moneda']}`\n\n"
-            f"Envía solo el número (ejemplo: `25`)."
+            f"• **Permitido:** `{plan['min']:g}` a `{plan['max']:g} {plan['moneda']}`\n\n"
+            f"Envía solo el número (ejemplo: `0.5` o `25`)."
         )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
@@ -1211,9 +1352,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["monto_elegido"] = monto_val
 
         texto = (
-            f"🌐 **Elige la Red de Pago**\n\n"
+            f"🌐 **Elige la Red de Pago (USDT en Todas)**\n\n"
             f"• **Plan:** {plan['nombre']}\n"
-            f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
+            f"• **Monto:** `{monto_val:g} {plan['moneda']}`\n\n"
             f"Toca la red que vas a usar:"
         )
         try:
@@ -1231,7 +1372,7 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reinv_flag = 1 if context.user_data.get("reinversion_auto") else 0
         texto = await registrar_solicitud_inversion(user.id, plan_id, monto_val, red_solicitada, reinv_flag)
         try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+            await query.message.edit_text(texto, reply_markup=teclado_tras_direccion(idioma), parse_mode="Markdown")
         except Exception as e:
             print(f"Error en invred: {e}", flush=True)
 
@@ -1240,26 +1381,44 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info = REDES_INFO.get(red_key)
         wallet = WALLETS_OFICIALES.get(red_key, "")
         if info and wallet:
+            await db_exec(_db_set_estado_sync, user.id, 0, 1, 0)
             texto = (
                 f"💳 **{info['nombre']}**\n"
-                f"• **Monedas:** `{' / '.join(info['monedas'])}`\n"
+                f"• **Monedas (incluye USDT):** `{' / '.join(info['monedas'])}`\n"
                 f"• **Dirección Oficial:**\n`{wallet}`\n\n"
-                f"⚠️ Tras transferir, toca **Reportar Hash** en el menú o usa `/notificar [Tu_Hash]`"
+                f"📩 **Tras realizar la transferencia, envía aquí el Hash / TXID** o toca **Enviar Hash / TXID**."
             )
             try:
-                await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+                await query.message.edit_text(texto, reply_markup=teclado_tras_direccion(idioma), parse_mode="Markdown")
             except Exception as e:
                 print(f"Error en red: {e}", flush=True)
 
     elif data == "btn_depositar":
+        await db_exec(_db_set_estado_sync, user.id, 0, 1, 0)
         try:
             await query.message.edit_text(
                 texto_wallets_deposito(idioma),
-                reply_markup=obtener_menu_principal(idioma),
+                reply_markup=teclado_tras_direccion(idioma),
                 parse_mode="Markdown",
             )
         except Exception as e:
             print(f"Error en btn_depositar: {e}", flush=True)
+
+    elif data == "enviar_hash_pago":
+        await db_exec(_db_set_estado_sync, user.id, 0, 1, 0)
+        texto = (
+            "📩 **Enviar Hash de Transferencia**\n\n"
+            "Pega aquí el **Hash / TXID** de la transacción que acabas de realizar:"
+            if idioma == "es"
+            else (
+                "📩 **Send Transfer Hash**\n\n"
+                "Paste here the **Hash / TXID** of the transfer you just made:"
+            )
+        )
+        try:
+            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error en enviar_hash_pago: {e}", flush=True)
 
     elif data == "btn_referidos":
         texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
@@ -1268,36 +1427,13 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Error en btn_referidos: {e}", flush=True)
 
-    elif data == "btn_reportar_hash":
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE usuarios SET esperando_hash = 1, en_soporte = 0, esperando_monto = 0 WHERE user_id = ?",
-                (user.id,),
-            )
-
-        texto = (
-            "📲 **Reportar Hash de Pago**\n\n"
-            "Envía o pega el **Hash / TXID** de tu transferencia en tu próximo mensaje:"
-            if idioma == "es"
-            else (
-                "📲 **Report Payment Hash**\n\n"
-                "Send or paste your transfer **Hash / TXID** in your next message:"
-            )
-        )
-        try:
-            await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
-        except Exception as e:
-            print(f"Error en btn_reportar_hash: {e}", flush=True)
-
     elif data == "btn_soporte":
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE usuarios SET en_soporte = 1, esperando_monto = 0, esperando_hash = 0 WHERE user_id = ?",
-                (user.id,),
-            )
-        texto = "🎧 **Centro de Soporte**. Escribe tu duda o problema a continuación:"
+        await db_exec(_db_set_estado_sync, user.id, 0, 0, 1)
+        texto = (
+            "🎧 ¡Hola! Escríbeme aquí abajo qué duda tienes o qué necesitas revisar y lo vemos enseguida."
+            if idioma == "es"
+            else "🎧 Hey! Write below what you need help with or want us to check and we'll look into it right away."
+        )
         try:
             await query.message.edit_text(texto, reply_markup=obtener_menu_principal(idioma), parse_mode="Markdown")
         except Exception as e:
@@ -1310,26 +1446,36 @@ async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def mostrar_planes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bloques_planes = []
-    for k, p in PLANES_INVERSION.items():
-        rango = (
-            f"{int(p['min']) if p['min'].is_integer() else p['min']}–"
-            f"{int(p['max']) if p['max'].is_integer() else p['max']} {p['moneda']}"
-        )
+    for _, p in PLANES_INVERSION.items():
+        rango = f"{p['min']:g}–{p['max']:g} {p['moneda']}"
         bloques_planes.append(
             f"🔹 *{p['nombre']}*\n"
             f"• Ciclo: `{p['tasa_ciclo']*100:.1f}%` | Rango: `{rango}`\n"
             f"• {p['detalle']}"
         )
-    texto = "📈 *Planes de Inversión*\n\n" + "\n\n".join(bloques_planes)
+    texto = "📈 *Planes de Inversión (Desde 0.5 USDT)*\n\n" + "\n\n".join(bloques_planes)
     await update.message.reply_text(texto, reply_markup=teclado_planes_y_redes("es"), parse_mode="Markdown")
 
 
 async def depositar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user:
+        await db_exec(_db_set_estado_sync, update.effective_user.id, 0, 1, 0)
     await update.message.reply_text(
         texto_wallets_deposito("es"),
-        reply_markup=obtener_menu_principal("es"),
+        reply_markup=teclado_tras_direccion("es"),
         parse_mode="Markdown",
     )
+
+
+def _db_guardar_hash_sync(user_id: int, hash_tx: str, limpiar_estado: bool = True):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+            (hash_tx, "TRON", "USDT", 0.0, "reporte_usuario", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        if limpiar_estado:
+            cursor.execute("UPDATE usuarios SET esperando_hash = 0 WHERE user_id = ?", (user_id,))
 
 
 async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1337,19 +1483,64 @@ async def notificar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("⚠️ Uso: `/notificar [Hash]`", parse_mode="Markdown")
         return
     hash_tx = " ".join(context.args).strip()
+    user_id = update.effective_user.id if update.effective_user else 0
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (hash_tx, "TRON", "USDT", 0.0, "reporte_usuario", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            )
+        await db_exec(_db_guardar_hash_sync, user_id, hash_tx, False)
     except Exception:
         pass
     await update.message.reply_text(
         f"⏳ Comprobante recibido (`{hash_tx}`). En proceso de verificación.",
         parse_mode="Markdown",
     )
+
+
+def _db_aprobar_deposito_sync(id_usuario: str, monto: float, moneda: str, red: str, tx_hash):
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    notificaciones = []
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
+            (monto, moneda, red, fecha_actual, id_usuario),
+        )
+        cursor.execute(
+            """
+            INSERT INTO inversiones (
+                user_id, plan_id, modalidad, monto, moneda, red,
+                reinversion_auto, dias_plazo, fecha_inicio, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
+            """,
+            (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
+        )
+        if tx_hash:
+            cursor.execute(
+                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
+                (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
+            )
+
+        porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
+        patrocinador_actual = id_usuario
+        for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
+            cursor.execute(
+                "SELECT patrocinador_id FROM usuarios WHERE user_id = ?",
+                (patrocinador_actual,),
+            )
+            resultado = cursor.fetchone()
+            if not resultado or not resultado[0]:
+                break
+            patrocinador_id = resultado[0]
+            comision = monto * porcentaje
+            cursor.execute(
+                "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
+                (comision, patrocinador_id),
+            )
+            notificaciones.append((
+                patrocinador_id,
+                f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
+                f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%).",
+            ))
+            patrocinador_actual = patrocinador_id
+    return notificaciones
 
 
 async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1371,6 +1562,10 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ El monto debe ser un número válido.")
         return
 
+    if monto < MIN_MONTO_INVERSION:
+        await update.message.reply_text(f"❌ El monto mínimo permitido es `{MIN_MONTO_INVERSION:g}`.", parse_mode="Markdown")
+        return
+
     moneda = context.args[2].upper()
     red = (
         context.args[3].upper()
@@ -1378,55 +1573,10 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else "TRON"
     )
     tx_hash = context.args[4].strip() if len(context.args) >= 5 else None
-    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notificaciones = []
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "UPDATE usuarios SET deposito_activo = deposito_activo + ?, moneda_deposito = ?, red_deposito = ?, fecha_deposito = ? WHERE user_id = ?",
-            (monto, moneda, red, fecha_actual, id_usuario),
-        )
-        cursor.execute(
-            """
-            INSERT INTO inversiones (
-                user_id, plan_id, modalidad, monto, moneda, red,
-                reinversion_auto, dias_plazo, fecha_inicio, estado
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa')
-            """,
-            (id_usuario, "1", "plazo_fijo", monto, moneda, red, 0, 7, fecha_actual),
-        )
-
-        if tx_hash:
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (tx_hash, red, moneda, monto, "aprobado_admin", fecha_actual),
-            )
-
-        porcentajes_niveles = [0.03, 0.02, 0.01, 0.005]
-        patrocinador_actual = id_usuario
-
-        for nivel, porcentaje in enumerate(porcentajes_niveles, start=1):
-            cursor.execute(
-                "SELECT patrocinador_id FROM usuarios WHERE user_id = ?",
-                (patrocinador_actual,),
-            )
-            resultado = cursor.fetchone()
-            if not resultado or not resultado[0]:
-                break
-            patrocinador_id = resultado[0]
-            comision = monto * porcentaje
-            cursor.execute(
-                "UPDATE usuarios SET ganancias_referidos = ganancias_referidos + ? WHERE user_id = ?",
-                (comision, patrocinador_id),
-            )
-            notificaciones.append((
-                patrocinador_id,
-                f"🎁 **¡Comisión por Inversión en tu Red! (Nivel {nivel})**\n\n"
-                f"• Has ganado: **{comision:.4f} {moneda}** ({porcentaje*100}%).",
-            ))
-            patrocinador_actual = patrocinador_id
+    notificaciones = await db_exec(
+        _db_aprobar_deposito_sync, id_usuario, monto, moneda, red, tx_hash
+    )
 
     for pat_id, msg in notificaciones:
         try:
@@ -1435,9 +1585,19 @@ async def aprobar_deposito(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"No se pudo notificar al patrocinador {pat_id}: {e}", flush=True)
 
     await update.message.reply_text(
-        f"✅ Depósito aprobado para `{id_usuario}`: `{monto} {moneda}` en `{red}`.",
+        f"✅ Depósito aprobado para `{id_usuario}`: `{monto:g} {moneda}` en `{red}`.",
         parse_mode="Markdown",
     )
+
+
+def _db_leer_estado_texto_sync(user_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
+            (user_id,),
+        )
+        return cursor.fetchone()
 
 
 async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1449,68 +1609,45 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     texto_msg = update.message.text.strip()
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT esperando_monto, esperando_hash, en_soporte, idioma FROM usuarios WHERE user_id = ?",
-            (user.id,),
-        )
-        row = cursor.fetchone()
+    row = await db_exec(_db_leer_estado_texto_sync, user.id)
+    if not row:
+        return
 
-        if not row:
-            return
+    esperando_monto, esperando_hash, en_soporte, idioma = row
+    idioma = idioma or "es"
 
-        esperando_monto, esperando_hash, en_soporte, idioma = row
-        idioma = idioma or "es"
-
-        if esperando_monto:
-            plan_id = context.user_data.get("plan_elegido", "1")
-            plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
-            try:
-                monto_val = float(texto_msg.replace(",", "."))
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Envía un número válido (ejemplo: `25`).",
-                    parse_mode="Markdown",
-                )
-                return
-
-            if monto_val < plan["min"] or monto_val > plan["max"]:
-                await update.message.reply_text(
-                    f"❌ El monto debe estar entre `{plan['min']}` y `{plan['max']} {plan['moneda']}`.",
-                    parse_mode="Markdown",
-                )
-                return
-
-            context.user_data["monto_elegido"] = monto_val
+    if esperando_monto:
+        plan_id = context.user_data.get("plan_elegido", "1")
+        plan = PLANES_INVERSION.get(plan_id, PLANES_INVERSION["1"])
+        try:
+            monto_val = float(texto_msg.replace(",", "."))
+        except ValueError:
             await update.message.reply_text(
-                f"🌐 **Elige la Red de Pago**\n\n"
-                f"• **Plan:** {plan['nombre']}\n"
-                f"• **Monto:** `{monto_val} {plan['moneda']}`\n\n"
-                f"Toca la red que vas a usar:",
-                reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
+                "❌ Envía un número válido (ejemplo: `0.5` o `25`).",
                 parse_mode="Markdown",
             )
             return
 
-        if esperando_hash:
-            cursor.execute(
-                "INSERT OR IGNORE INTO comprobantes_verificados (tx_hash, red, moneda, monto, tipo, fecha) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    texto_msg,
-                    "TRON",
-                    "USDT",
-                    0.0,
-                    "reporte_usuario",
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                ),
+        if monto_val < plan["min"] or monto_val > plan["max"]:
+            await update.message.reply_text(
+                f"❌ El monto debe estar entre `{plan['min']:g}` y `{plan['max']:g} {plan['moneda']}`.",
+                parse_mode="Markdown",
             )
-            cursor.execute(
-                "UPDATE usuarios SET esperando_hash = 0 WHERE user_id = ?",
-                (user.id,),
-            )
+            return
+
+        context.user_data["monto_elegido"] = monto_val
+        await update.message.reply_text(
+            f"🌐 **Elige la Red de Pago (USDT en Todas)**\n\n"
+            f"• **Plan:** {plan['nombre']}\n"
+            f"• **Monto:** `{monto_val:g} {plan['moneda']}`\n\n"
+            f"Toca la red que vas a usar:",
+            reply_markup=teclado_redes_inversion(plan_id, monto_val, idioma),
+            parse_mode="Markdown",
+        )
+        return
 
     if esperando_hash:
+        await db_exec(_db_guardar_hash_sync, user.id, texto_msg, True)
         if ADMIN_ID:
             try:
                 await context.bot.send_message(
@@ -1533,13 +1670,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if en_soporte:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE usuarios SET en_soporte = 0 WHERE user_id = ?",
-                (user.id,),
-            )
-
+        await db_exec(_db_set_estado_sync, user.id, 0, 0, 0)
         if ADMIN_ID:
             try:
                 await context.bot.send_message(
@@ -1555,7 +1686,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"Error enviando soporte al admin: {e}", flush=True)
 
         await update.message.reply_text(
-            "✅ Tu mensaje fue enviado a soporte. Te responderemos pronto.",
+            "✅ ¡Listo! Ya pasé tu mensaje a soporte y te respondemos en cuanto lo revisemos.",
             reply_markup=obtener_menu_principal(idioma),
             parse_mode="Markdown",
         )
@@ -1579,7 +1710,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    await asyncio.sleep(4)
+    await asyncio.sleep(3)
     try:
         await application.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
@@ -1639,7 +1770,7 @@ def main():
     print("Iniciando polling de Telegram...", flush=True)
     application.run_polling(
         drop_pending_updates=True,
-        poll_interval=1.5,
+        poll_interval=1.0,
         timeout=20,
         bootstrap_retries=5,
     )
