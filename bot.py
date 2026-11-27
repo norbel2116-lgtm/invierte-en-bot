@@ -40,6 +40,14 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 LINK_CANAL = os.getenv("LINK_CANAL", "https://t.me/TuCanalDePagos")
 DB_PATH = os.getenv("DB_PATH", "usuarios.db")
+SELF_PING_URL = (
+    os.getenv("SELF_PING_URL")
+    or (
+        f"{os.getenv('RENDER_EXTERNAL_URL').rstrip('/')}/health"
+        if os.getenv("RENDER_EXTERNAL_URL")
+        else ""
+    )
+)
 
 # --- 5 WALLETS Y REDES OFICIALES (USDT HABILITADO EN TODAS) ---
 WALLETS_OFICIALES = {
@@ -323,7 +331,6 @@ def es_hash_valido(tx_hash: str, red: str) -> bool:
 def _marcar_hash_usado(tx_hash: str):
     HASHES_USADOS_SESION.add(tx_hash)
     if len(HASHES_USADOS_SESION) > 2000:
-        # Conserva los últimos 500 sin vaciar por completo
         recientes = list(HASHES_USADOS_SESION)[-500:]
         HASHES_USADOS_SESION.clear()
         HASHES_USADOS_SESION.update(recientes)
@@ -552,7 +559,6 @@ def calcular_retiro_anticipado(capital_base: float, moneda: str):
 
 
 async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
-    # Priorizamos primero TRON, TON y BTC para darles presencia equilibrada
     prioritarias = ["TRON", "TON", "BTC"]
     secundarias = ["BSC", "ETH"]
     random.shuffle(prioritarias)
@@ -643,7 +649,32 @@ async def tarea_comprobaciones_canal(bot):
         raise
 
 
-# --- TECLADOS INLINE CORTOS Y CLAROS (SIN BOTÓN REPORTAR HASH EN MENÚ PRINCIPAL) ---
+async def tarea_keep_alive():
+    if not SELF_PING_URL:
+        print("Keep-alive interno omitido: no hay SELF_PING_URL ni RENDER_EXTERNAL_URL.", flush=True)
+        return
+
+    await asyncio.sleep(20)
+    timeout = aiohttp.ClientTimeout(total=8)
+    try:
+        while True:
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(SELF_PING_URL) as resp:
+                        if resp.status != 200:
+                            print(f"Keep-alive respondió con status {resp.status}", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"Aviso en keep-alive interno: {e}", flush=True)
+
+            await asyncio.sleep(540)
+    except asyncio.CancelledError:
+        print("Tarea keep-alive cancelada limpiamente.", flush=True)
+        raise
+
+
+# --- TECLADOS INLINE CORTOS Y CLAROS ---
 def obtener_menu_idiomas():
     return InlineKeyboardMarkup([
         [
@@ -714,7 +745,7 @@ def teclado_tras_direccion(idioma="es"):
 
 def teclado_planes_y_redes(idioma="es"):
     filas = []
-    for key, plan in PLANES_INVERSION.items():
+    for _, plan in PLANES_INVERSION.items():
         filas.append([
             InlineKeyboardButton(plan["boton"], callback_data=f"sel_plan_{key}")
         ])
@@ -875,7 +906,6 @@ def _db_registrar_solicitud_sync(
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
-        # Dejamos esperando_hash = 1 listo para que tras pagar envíe directamente el hash
         cursor.execute(
             "UPDATE usuarios SET esperando_monto = 0, esperando_hash = 1, en_soporte = 0 WHERE user_id = ?",
             (user_id,),
@@ -1156,7 +1186,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         return
 
-    # Responder de inmediato para evitar demora visual al pulsar botones
     try:
         await query.answer()
     except Exception:
@@ -1719,16 +1748,20 @@ async def post_init(application):
     application.bot_data["tarea_comprobaciones"] = asyncio.create_task(
         tarea_comprobaciones_canal(application.bot)
     )
+    application.bot_data["tarea_keep_alive"] = asyncio.create_task(
+        tarea_keep_alive()
+    )
 
 
 async def post_shutdown(application):
-    tarea = application.bot_data.get("tarea_comprobaciones")
-    if tarea and not tarea.done():
-        tarea.cancel()
-        try:
-            await tarea
-        except asyncio.CancelledError:
-            pass
+    for key in ("tarea_comprobaciones", "tarea_keep_alive"):
+        tarea = application.bot_data.get(key)
+        if tarea and not tarea.done():
+            tarea.cancel()
+            try:
+                await tarea
+            except asyncio.CancelledError:
+                pass
 
 
 def main():
