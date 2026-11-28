@@ -791,7 +791,7 @@ async def tarea_comprobaciones_canal(bot):
         while True:
             try:
                 if CHANNEL_ID and CHANNEL_ID != "-1001234567890":
-                    cantidad_envios = random.randint(1, 5)
+                    cantidad_envios = random.randint(1, 2)
                     enviados = 0
 
                     for _ in range(cantidad_envios):
@@ -801,8 +801,8 @@ async def tarea_comprobaciones_canal(bot):
                             usuario = generar_usuario_ficticio()
                             etiqueta_tipo = "Depósito" if tipo_op == "deposito" else "Retiro"
                             texto = (
-                                f"📢 <b>Comprobante de {esc(etiqueta_tipo)}</b>\n\n"
-                                f"• <b>Usuario:</b> <code>{esc(usuario)}</code>\n"
+                                f"📢 <b>Aviso de {esc(etiqueta_tipo)} (Actividad de Red)</b>\n\n"
+                                f"• <b>Referencia:</b> <code>{esc(usuario)}</code>\n"
                                 f"• <b>Monto:</b> <code>{esc(comp['monto'])} {esc(comp['moneda'])}</code>\n"
                                 f"• <b>Red:</b> <code>{esc(comp['red'])}</code>\n"
                                 f"• <b>Hash:</b> <code>{esc(comp['hash'])}</code>\n"
@@ -831,7 +831,7 @@ async def tarea_comprobaciones_canal(bot):
                                 )
                             except TelegramError as te:
                                 print(f"Error enviando comprobante al canal: {te}", flush=True)
-                            await asyncio.sleep(1.5)
+                            await asyncio.sleep(2.0)
 
                     print(f"Ciclo comprobaciones: enviados {enviados}/{cantidad_envios}", flush=True)
             except asyncio.CancelledError:
@@ -839,7 +839,7 @@ async def tarea_comprobaciones_canal(bot):
             except Exception as e:
                 print(f"Error en tarea_comprobaciones_canal: {e}", flush=True)
 
-            espera_segundos = random.randint(300, 1200)
+            espera_segundos = random.randint(900, 2400)
             print(f"Próximo ciclo de comprobantes en {espera_segundos // 60} min ({espera_segundos}s)", flush=True)
             await asyncio.sleep(espera_segundos)
     except asyncio.CancelledError:
@@ -1783,7 +1783,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             texto = (
                 f"🏦 <b>Liquidity Pool</b>\n\n"
                 f"• <b>Current reserve:</b> <code>${fondo_actual:,.2f} USD</code>\n"
-                f"• <b>Safety floor:</b> <code>${PISO_FONDO_USD:,.2f} USD</code>\n"
                 f"• <b>Supported networks:</b> TRON, TON, BSC, ETH, BTC & SOL (USDT and compatible tokens)\n"
                 f"• <b>Min investment / withdrawal:</b> <code>0.5 USD</code>{act_linea}"
             )
@@ -1791,7 +1790,6 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             texto = (
                 f"🏦 <b>Fondo de Liquidez</b>\n\n"
                 f"• <b>Reserva actual:</b> <code>${fondo_actual:,.2f} USD</code>\n"
-                f"• <b>Piso de seguridad:</b> <code>${PISO_FONDO_USD:,.2f} USD</code>\n"
                 f"• <b>Redes disponibles:</b> TRON, TON, BSC, ETH, BTC y SOL (USDT y tokens compatibles)\n"
                 f"• <b>Mínimo de inversión y retiro:</b> <code>0.5 USD</code>{act_linea}"
             )
@@ -1978,6 +1976,20 @@ async def depositar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=teclado_wallets_accion("es"),
         parse_mode="HTML",
     )
+
+
+async def ver_fondo_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id != ADMIN_ID:
+        return
+    fondo_actual, ultima_act = await db_exec(_db_obtener_liquidez_sync)
+    texto = (
+        f"🔐 <b>Panel Interno del Fondo</b>\n\n"
+        f"• <b>Reserva actual:</b> <code>${fondo_actual:,.2f} USD</code>\n"
+        f"• <b>Piso de seguridad:</b> <code>${PISO_FONDO_USD:,.2f} USD</code>\n"
+        f"• <b>Último ajuste:</b> <code>{esc(ultima_act or 'Sin registro')}</code>"
+    )
+    await editar_o_responder_texto(update, texto, parse_mode="HTML")
 
 
 def _db_guardar_hash_y_pendiente_sync(user_id: int, hash_tx: str, limpiar_estado: bool = True):
@@ -2283,6 +2295,7 @@ def main():
     application.add_handler(CommandHandler("saldo", mostrar_saldo))
     application.add_handler(CommandHandler("planes", mostrar_planes))
     application.add_handler(CommandHandler("depositar", depositar))
+    application.add_handler(CommandHandler("fondo", ver_fondo_admin))
     application.add_handler(CommandHandler("notificar", notificar_deposito))
     application.add_handler(CommandHandler("aprobar", aprobar_deposito))
     application.add_handler(CallbackQueryHandler(boton_callback))
