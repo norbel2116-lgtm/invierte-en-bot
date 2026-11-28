@@ -1114,30 +1114,37 @@ def texto_wallets_deposito(idioma="es"):
 def construir_mensaje_referidos(username_bot, user_id, idioma="es"):
     bot_user = username_bot or "TuBot"
     link_referido = f"https://t.me/{bot_user}?start={user_id}"
+    enlace_html = f'<a href="{esc(link_referido)}">{esc(link_referido)}</a>'
+
     if idioma == "en":
         return (
-            f"🌟 <b>Welcome! Glad to have you here</b>\n\n"
-            f"🚀 <b>Your Referral Link:</b>\n<code>{esc(link_referido)}</code>\n\n"
-            f"🎁 <b>Referral Rewards:</b>\n"
+            f"👥 <b>Invite &amp; Earn</b>\n\n"
+            f"Tap your referral link to open the bot:\n"
+            f"{enlace_html}\n\n"
             f"• Join bonus: <code>+{BONO_ENTRADA_REFERIDO_USD:g} USD</code>\n"
-            f"• Multi-level commissions when referrals invest\n\n"
-            f"📊 <b>Plans (From 0.5 USD):</b>\n"
-            f"• <b>Starter (7d - 0.7%):</b> Min 0.5 USD\n"
-            f"• <b>Growth (14d - 1.2%/wk):</b> Min 0.5 USD\n"
-            f"• <b>Pro / Elite (21d - 2.6%/wk):</b> Min 1 USD\n\n"
-            f"💡 <b>Withdrawals:</b> Min <code>0.5 USD</code> with investment history; early exit forfeits profits + fee (<code>0.2</code> or <code>0.00001 BTC</code>)."
+            f"• Multi-level commissions when your referrals invest\n"
+            f"• <b>Plans (from 0.5 USD):</b>\n"
+            f"  – Starter (7d - 0.7%): min 0.5 USD\n"
+            f"  – Growth (14d - 1.2%/wk): min 0.5 USD\n"
+            f"  – Pro / Elite (21d - 2.6%/wk): min 1 USD\n"
+            f"  – Goal (30d - 0.8%/wk): min 0.5 USD\n"
+            f"  – Flexible (no lock-up - 0.5%/7d): min 0.5 USD\n"
+            f"• Min withdrawal: <code>0.5 USD</code> (with investment history)"
         )
+
     return (
-        f"🌟 <b>¡Qué bueno tenerte por aquí!</b>\n\n"
-        f"🚀 <b>Tu enlace para invitar referidos:</b>\n<code>{esc(link_referido)}</code>\n\n"
-        f"🎁 <b>Cómo ganas con referidos:</b>\n"
-        f"• Bono al entrar tu referido: <code>+{BONO_ENTRADA_REFERIDO_USD:g} USD</code>\n"
-        f"• Comisiones por niveles cuando tus referidos invierten\n\n"
-        f"📊 <b>Planes disponibles (desde 0.5 USD):</b>\n"
-        f"• <b>Inicio (7 días - 0.7%):</b> Mínimo 0.5 USD\n"
-        f"• <b>Crecimiento (14 días - 1.2%/sem):</b> Mínimo 0.5 USD\n"
-        f"• <b>Pro / Élite (21 días - 2.6%/sem):</b> Mínimo 1 USD\n\n"
-        f"💡 <b>Retiros:</b> Mínimo <code>0.5 USD</code> teniendo historial de inversión; si retiras antes de tiempo se pierden ganancias y aplica comisión de red (<code>0.2</code> o <code>0.00001 BTC</code>)."
+        f"👥 <b>Invita y gana</b>\n\n"
+        f"Toca tu enlace para abrir el bot:\n"
+        f"{enlace_html}\n\n"
+        f"• Bono por entrar: <code>+{BONO_ENTRADA_REFERIDO_USD:g} USD</code>\n"
+        f"• Comisiones por niveles cuando invierten\n"
+        f"• <b>Planes (desde 0.5 USD):</b>\n"
+        f"  – Inicio (7d - 0.7%): mín. 0.5 USD\n"
+        f"  – Crecimiento (14d - 1.2%/sem): mín. 0.5 USD\n"
+        f"  – Pro / Élite (21d - 2.6%/sem): mín. 1 USD\n"
+        f"  – Meta (30d - 0.8%/sem): mín. 0.5 USD\n"
+        f"  – Flexible (sin plazo fijo - 0.5%/7d): mín. 0.5 USD\n"
+        f"• Retiro mínimo: <code>0.5 USD</code> (con historial de inversión)"
     )
 
 
