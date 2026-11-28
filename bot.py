@@ -652,16 +652,19 @@ async def _obtener_tx_evm_rpc(
                         }
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            continue
         except Exception as e:
-            print(f"Error RPC {red_key} ({rpc_url}): {e}", flush=True)
+            detalle_err = str(e).strip() or type(e).__name__
+            print(f"Aviso RPC {red_key} ({rpc_url}): {detalle_err}", flush=True)
     return None
 
 
 async def obtener_tx_real_bsc(session: aiohttp.ClientSession, _address: str, tipo_operacion: str = "deposito"):
     rpcs_bsc = [
+        "https://bsc-rpc.publicnode.com",
         "https://bsc-dataseed.binance.org/",
         "https://bsc-dataseed1.defibit.io/",
-        "https://bsc-rpc.publicnode.com",
     ]
     return await _obtener_tx_evm_rpc(session, rpcs_bsc, "BSC", "BNB", tipo_operacion)
 
@@ -678,10 +681,10 @@ async def obtener_tx_real_sol(session: aiohttp.ClientSession, address: str, _tip
     if not address or address == "TuDireccionSolanaAqui":
         return None
     rpcs_sol = [
-        "https://api.mainnet-beta.solana.com",
         "https://solana-rpc.publicnode.com",
+        "https://api.mainnet-beta.solana.com",
     ]
-    req_timeout = aiohttp.ClientTimeout(total=7)
+    req_timeout = aiohttp.ClientTimeout(total=8)
     for rpc_url in rpcs_sol:
         try:
             payload_sigs = {
@@ -728,8 +731,12 @@ async def obtener_tx_real_sol(session: aiohttp.ClientSession, address: str, _tip
                                 }
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            continue
         except Exception as e:
-            print(f"Error RPC SOL ({rpc_url}): {e}", flush=True)
+            detalle_err = str(e).strip()
+            if detalle_err:
+                print(f"Aviso RPC SOL ({rpc_url}): {detalle_err}", flush=True)
     return None
 
 
@@ -779,7 +786,8 @@ async def obtener_comprobante_multired(tipo_operacion: str = "retiro"):
                 raise
             except Exception as e:
                 sin_resultado.append(f"{red_key}(err)")
-                print(f"Error consultando blockchain {red_key}: {e}", flush=True)
+                detalle_err = str(e).strip() or type(e).__name__
+                print(f"Error consultando blockchain {red_key}: {detalle_err}", flush=True)
 
     print(f"Multired sin tx válida en ciclo ({tipo_operacion}): {', '.join(sin_resultado)}", flush=True)
     return None
@@ -864,7 +872,8 @@ async def tarea_keep_alive():
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f"Aviso en keep-alive interno: {e}", flush=True)
+                detalle_err = str(e).strip() or type(e).__name__
+                print(f"Aviso en keep-alive interno: {detalle_err}", flush=True)
 
             await asyncio.sleep(540)
     except asyncio.CancelledError:
@@ -882,9 +891,9 @@ def obtener_menu_idiomas():
     ])
 
 
-def obtener_menu_principal(idioma="es"):
+def obtener_menu_principal(idioma="es", user_id: int = 0):
     if idioma == "en":
-        return InlineKeyboardMarkup([
+        filas = [
             [
                 InlineKeyboardButton("💰 Balance", callback_data="btn_saldo"),
                 InlineKeyboardButton("🏦 Pool", callback_data="btn_liquidez"),
@@ -905,30 +914,37 @@ def obtener_menu_principal(idioma="es"):
                 InlineKeyboardButton("📢 Proofs", url=LINK_CANAL),
                 InlineKeyboardButton("🌐 Language", callback_data="btn_cambiar_idioma"),
             ],
+        ]
+    else:
+        filas = [
+            [
+                InlineKeyboardButton("💰 Mi Saldo", callback_data="btn_saldo"),
+                InlineKeyboardButton("🏦 Liquidez", callback_data="btn_liquidez"),
+            ],
+            [
+                InlineKeyboardButton("📈 Invertir", callback_data="btn_planes"),
+                InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
+            ],
+            [
+                InlineKeyboardButton("📜 Historial", callback_data="btn_historial"),
+                InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
+            ],
+            [
+                InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
+                InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
+            ],
+            [
+                InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
+                InlineKeyboardButton("🌐 Idioma", callback_data="btn_cambiar_idioma"),
+            ],
+        ]
+
+    if user_id and user_id == ADMIN_ID:
+        filas.append([
+            InlineKeyboardButton("🔐 Panel Fondo (Admin)", callback_data="btn_admin_fondo")
         ])
 
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("💰 Mi Saldo", callback_data="btn_saldo"),
-            InlineKeyboardButton("🏦 Liquidez", callback_data="btn_liquidez"),
-        ],
-        [
-            InlineKeyboardButton("📈 Invertir", callback_data="btn_planes"),
-            InlineKeyboardButton("💳 Wallets", callback_data="btn_depositar"),
-        ],
-        [
-            InlineKeyboardButton("📜 Historial", callback_data="btn_historial"),
-            InlineKeyboardButton("👥 Referidos", callback_data="btn_referidos"),
-        ],
-        [
-            InlineKeyboardButton("💸 Retirar", callback_data="btn_retirar"),
-            InlineKeyboardButton("🎧 Soporte", callback_data="btn_soporte"),
-        ],
-        [
-            InlineKeyboardButton("📢 Pagos", url=LINK_CANAL),
-            InlineKeyboardButton("🌐 Idioma", callback_data="btn_cambiar_idioma"),
-        ],
-    ])
+    return InlineKeyboardMarkup(filas)
 
 
 def teclado_tras_direccion(idioma="es"):
@@ -1418,7 +1434,9 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                 if idioma == "es"
                 else "🏦 <b>Withdrawals:</b> You need investment history (from <code>0.5 USD</code>) to request a withdrawal."
             )
-            await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+            await editar_o_responder_texto(
+                update, texto, reply_markup=obtener_menu_principal(idioma, user_id), parse_mode="HTML"
+            )
             return
 
         retira_capital = deposito_activo > 0
@@ -1429,7 +1447,9 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                 if idioma == "es"
                 else f"🏦 <b>Withdrawals:</b> Minimum withdrawal is <code>{MIN_MONTO_RETIRO:g} USD</code> and you currently have <code>{saldo_retirable:g} USD</code> available."
             )
-            await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+            await editar_o_responder_texto(
+                update, texto, reply_markup=obtener_menu_principal(idioma, user_id), parse_mode="HTML"
+            )
             return
 
         calc = calcular_retiro_anticipado(saldo_retirable, moneda)
@@ -1472,7 +1492,9 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                 if motivo == "sin_historial"
                 else f"⚠️ El retiro mínimo es {MIN_MONTO_RETIRO:g} USD."
             )
-            await editar_o_responder_texto(update, esc(msg_err), reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+            await editar_o_responder_texto(
+                update, esc(msg_err), reply_markup=obtener_menu_principal(idioma, user_id), parse_mode="HTML"
+            )
             return
 
         try:
@@ -1503,7 +1525,9 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
                 f"• <b>Network Fee:</b> <code>-{calc['comision_red']} USD</code>"
             )
         )
-        await editar_o_responder_texto(update, texto_ok, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto_ok, reply_markup=obtener_menu_principal(idioma, user_id), parse_mode="HTML"
+        )
         return
 
     if data == "cancel_retiro_anticipado":
@@ -1512,7 +1536,9 @@ async def procesar_retiro_anticipado(update: Update, context: ContextTypes.DEFAU
             if idioma == "es"
             else "👍 <b>Withdrawal cancelled.</b> Your balance and investments remain unchanged."
         )
-        await editar_o_responder_texto(update, texto_cancel, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto_cancel, reply_markup=obtener_menu_principal(idioma, user_id), parse_mode="HTML"
+        )
 
 
 def _db_aprobar_deposito_sync(id_usuario: str, monto: float, moneda: str, red: str, tx_hash):
@@ -1719,6 +1745,10 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = query.from_user
 
+    if data == "btn_admin_fondo":
+        await ver_fondo_admin(update, context)
+        return
+
     if data.startswith("adm_"):
         await procesar_callback_admin(update, context)
         return
@@ -1744,7 +1774,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👇 <b>Elige qué deseas hacer:</b>"
             )
 
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(nuevo_idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(nuevo_idioma, user.id), parse_mode="HTML"
+        )
         return
 
     idioma = await db_exec(_db_obtener_idioma_sync, user.id)
@@ -1781,7 +1813,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• Saldo por Referidos: <code>{ganancia_ref:.2f} USD</code>\n"
                 f"• Retiro Mínimo: <code>{MIN_MONTO_RETIRO:g} USD</code> (teniendo historial de inversión)"
             )
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data == "btn_liquidez":
         fondo_actual, ultima_act = await db_exec(_db_obtener_liquidez_sync)
@@ -1800,7 +1834,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• <b>Redes disponibles:</b> TRON, TON, BSC, ETH, BTC y SOL (USDT y tokens compatibles)\n"
                 f"• <b>Mínimo de inversión y retiro:</b> <code>0.5 USD</code>{act_linea}"
             )
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data == "btn_historial":
         filas = await db_exec(_db_obtener_historial_sync, user.id)
@@ -1822,7 +1858,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             encabezado = "📜 <b>Tus Últimas Inversiones</b>\n\n" if idioma == "es" else "📜 <b>Your Recent Investments</b>\n\n"
             texto = encabezado + "\n\n".join(lineas)
 
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data == "btn_planes":
         await editar_o_responder_texto(
@@ -1876,7 +1914,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• <b>Rango permitido:</b> {plan['min']:g} a {plan['max']:g} USD\n\n"
             f"Envía solo el número (por ejemplo: <code>0.5</code> o <code>25</code>)."
         )
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data.startswith("monto_"):
         partes = data.split("_")
@@ -1947,11 +1987,15 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Paste here your transaction <b>Hash / TXID</b>:"
             )
         )
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data == "btn_referidos":
         texto = construir_mensaje_referidos(context.bot.username, user.id, idioma)
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
     elif data == "btn_soporte":
         await db_exec(_db_set_estado_sync, user.id, 0, 0, 1, write=True)
@@ -1960,7 +2004,9 @@ async def boton_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idioma == "es"
             else "🎧 Hey! Write below what you need help with and we'll check it right away."
         )
-        await editar_o_responder_texto(update, texto, reply_markup=obtener_menu_principal(idioma), parse_mode="HTML")
+        await editar_o_responder_texto(
+            update, texto, reply_markup=obtener_menu_principal(idioma, user.id), parse_mode="HTML"
+        )
 
 
 async def mostrar_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1996,7 +2042,12 @@ async def ver_fondo_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <b>Piso de seguridad:</b> <code>${PISO_FONDO_USD:,.2f} USD</code>\n"
         f"• <b>Último ajuste:</b> <code>{esc(ultima_act or 'Sin registro')}</code>"
     )
-    await editar_o_responder_texto(update, texto, parse_mode="HTML")
+    await editar_o_responder_texto(
+        update,
+        texto,
+        reply_markup=obtener_menu_principal("es", user.id),
+        parse_mode="HTML",
+    )
 
 
 def _db_guardar_hash_y_pendiente_sync(user_id: int, hash_tx: str, limpiar_estado: bool = True):
@@ -2199,7 +2250,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await editar_o_responder_texto(
             update,
             f"⏳ Recibimos tu comprobante (<code>{esc(texto_msg)}</code>). Estamos en proceso de verificación.",
-            reply_markup=obtener_menu_principal(idioma),
+            reply_markup=obtener_menu_principal(idioma, user.id),
             parse_mode="HTML",
         )
         return
@@ -2223,7 +2274,7 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await editar_o_responder_texto(
             update,
             "✅ ¡Listo! Ya pasé tu mensaje a soporte y te respondemos en cuanto lo revisemos.",
-            reply_markup=obtener_menu_principal(idioma),
+            reply_markup=obtener_menu_principal(idioma, user.id),
             parse_mode="HTML",
         )
 
